@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MapLibre Layer Control - Examples</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      color: white;
+      text-align: center;
+      margin-bottom: 10px;
+      font-size: 2.5rem;
+    }
+
+    .subtitle {
+      color: rgba(255, 255, 255, 0.9);
+      text-align: center;
+      margin-bottom: 40px;
+      font-size: 1.1rem;
+    }
+
+    .examples-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+    }
+
+    .example-card {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+      transition: transform 0.2s, box-shadow 0.2s;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+    }
+
+    .example-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 15px 50px rgba(0, 0, 0, 0.3);
+    }
+
+    .example-card h2 {
+      color: #333;
+      margin-bottom: 8px;
+      font-size: 1.3rem;
+    }
+
+    .example-card p {
+      color: #666;
+      font-size: 0.95rem;
+      line-height: 1.5;
+      margin-bottom: 16px;
+    }
+
+    .example-card .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .tag {
+      background: #f0f0f0;
+      color: #555;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      font-weight: 500;
+    }
+
+    .tag.fill { background: #e3f2fd; color: #1565c0; }
+    .tag.line { background: #fce4ec; color: #c2185b; }
+    .tag.circle { background: #fff3e0; color: #ef6c00; }
+    .tag.raster { background: #e8f5e9; color: #2e7d32; }
+    .tag.react { background: #e1f5fe; color: #0277bd; }
+
+    .footer {
+      text-align: center;
+      margin-top: 40px;
+      color: rgba(255, 255, 255, 0.8);
+    }
+
+    .footer a {
+      color: white;
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>MapLibre Layer Control</h1>
+    <p class="subtitle">Interactive layer control for MapLibre GL JS with visibility toggle, opacity slider, and style editor</p>
+
+    <div class="examples-grid">
+      <a href="./examples/basic/index.html" class="example-card">
+        <h2>Basic Example</h2>
+        <p>Simple setup with auto-detected layers from the map style. Great starting point for understanding the basics.</p>
+        <div class="tags">
+          <span class="tag">Vanilla JS</span>
+          <span class="tag">Auto-detect</span>
+        </div>
+      </a>
+
+      <a href="./examples/full-demo/index.html" class="example-card">
+        <h2>Full Demo</h2>
+        <p>Comprehensive demo showcasing all layer types with custom GeoJSON data and raster overlay.</p>
+        <div class="tags">
+          <span class="tag fill">Fill</span>
+          <span class="tag line">Line</span>
+          <span class="tag circle">Circle</span>
+          <span class="tag raster">Raster</span>
+        </div>
+      </a>
+
+      <a href="./examples/react/index.html" class="example-card">
+        <h2>React Integration</h2>
+        <p>React component integration using LayerControlReact with hooks and proper lifecycle management.</p>
+        <div class="tags">
+          <span class="tag react">React</span>
+          <span class="tag">TypeScript</span>
+          <span class="tag">Hooks</span>
+        </div>
+      </a>
+    </div>
+
+    <div class="footer">
+      <p>
+        <a href="https://github.com/opengeos/maplibre-gl-layer-control">GitHub</a> ·
+        <a href="https://www.npmjs.com/package/maplibre-gl-layer-control">npm</a>
+      </p>
+    </div>
+  </div>
+</body>
+</html>
