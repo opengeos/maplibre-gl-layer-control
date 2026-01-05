@@ -29,6 +29,7 @@ coverage
 
 # Build
 dist/
+dist-examples/
 
 # Environment
 .env

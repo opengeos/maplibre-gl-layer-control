@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MapLibre Layer Control - CDN Example</title>
+
+  <!-- MapLibre GL CSS and JS -->
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+
+  <!-- Layer Control CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl-layer-control/dist/maplibre-gl-layer-control.css">
+
+  <style>
+    body { margin: 0; padding: 0; }
+    #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+
+    .info-panel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: white;
+      padding: 15px;
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      max-width: 280px;
+      z-index: 1;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    .info-panel h2 {
+      margin: 0 0 10px 0;
+      font-size: 16px;
+      color: #333;
+    }
+
+    .info-panel p {
+      margin: 5px 0;
+      font-size: 13px;
+      color: #666;
+      line-height: 1.4;
+    }
+
+    .info-panel ul {
+      margin: 10px 0;
+      padding-left: 20px;
+      font-size: 13px;
+      color: #666;
+      line-height: 1.6;
+    }
+
+    .info-panel .close-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: none;
+      border: none;
+      font-size: 18px;
+      cursor: pointer;
+      color: #999;
+      padding: 0;
+      width: 20px;
+      height: 20px;
+      line-height: 1;
+    }
+
+    .info-panel .close-btn:hover {
+      color: #333;
+    }
+  </style>
+</head>
+<body>
+  <!-- Info Panel -->
+  <div id="info-panel" class="info-panel">
+    <button class="close-btn" onclick="document.getElementById('info-panel').style.display='none'">&times;</button>
+    <h2>CDN Example</h2>
+    <p>This example uses the npm package via CDN (no build step required).</p>
+    <p><strong>Layer Types:</strong></p>
+    <ul>
+      <li><strong>Fill</strong> - Country polygons</li>
+      <li><strong>Line</strong> - Country outlines</li>
+      <li><strong>Circle</strong> - Point markers</li>
+      <li><strong>Raster</strong> - OSM tile overlay</li>
+    </ul>
+    <p>Click the layers icon (top-right) to open the control panel.</p>
+  </div>
+
+  <div id="map"></div>
+
+  <script type="module">
+    // Import the layer control from CDN
+    import { LayerControl } from 'https://unpkg.com/maplibre-gl-layer-control/dist/index.mjs';
+
+    // Create the map
+    const map = new maplibregl.Map({
+      container: 'map',
+      style: 'https://demotiles.maplibre.org/style.json',
+      center: [0, 0],
+      zoom: 2
+    });
+
+    // Add navigation control
+    map.addControl(new maplibregl.NavigationControl(), 'top-right');
+
+    // Add fullscreen control
+    map.addControl(new maplibregl.FullscreenControl(), 'top-right');
+
+    map.on('load', () => {
+      // Create GeoJSON with country bounding boxes
+      const geojson = {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            properties: { name: 'United States' },
+            geometry: {
+              type: 'Polygon',
+              coordinates: [[
+                [-125, 25], [-125, 49], [-66, 49], [-66, 25], [-125, 25]
+              ]]
+            }
+          },
+          {
+            type: 'Feature',
+            properties: { name: 'Brazil' },
+            geometry: {
+              type: 'Polygon',
+              coordinates: [[
+                [-73, -33], [-73, 5], [-34, 5], [-34, -33], [-73, -33]
+              ]]
+            }
+          },
+          {
+            type: 'Feature',
+            properties: { name: 'China' },
+            geometry: {
+              type: 'Polygon',
+              coordinates: [[
+                [73, 18], [73, 53], [135, 53], [135, 18], [73, 18]
+              ]]
+            }
+          },
+          {
+            type: 'Feature',
+            properties: { name: 'Australia' },
+            geometry: {
+              type: 'Polygon',
+              coordinates: [[
+                [113, -44], [113, -10], [154, -10], [154, -44], [113, -44]
+              ]]
+            }
+          }
+        ]
+      };
+
+      // Add GeoJSON source
+      map.addSource('countries-source', {
+        type: 'geojson',
+        data: geojson
+      });
+
+      // Add fill layer
+      map.addLayer({
+        id: 'countries-fill',
+        type: 'fill',
+        source: 'countries-source',
+        paint: {
+          'fill-color': '#088',
+          'fill-opacity': 0.5
+        }
+      });
+
+      // Add outline layer
+      map.addLayer({
+        id: 'countries-outline',
+        type: 'line',
+        source: 'countries-source',
+        paint: {
+          'line-color': '#000',
+          'line-width': 2,
+          'line-opacity': 1.0
+        }
+      });
+
+      // Add circle layer (points)
+      map.addLayer({
+        id: 'country-points',
+        type: 'circle',
+        source: 'countries-source',
+        paint: {
+          'circle-radius': 8,
+          'circle-color': '#ef4444',
+          'circle-opacity': 0.8,
+          'circle-stroke-width': 2,
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-opacity': 1
+        }
+      });
+
+      // Add raster layer (OSM tiles)
+      map.addSource('raster-source', {
+        type: 'raster',
+        tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+        tileSize: 256,
+        attribution: '&copy; OpenStreetMap contributors'
+      });
+
+      map.addLayer({
+        id: 'raster-layer',
+        type: 'raster',
+        source: 'raster-source',
+        paint: {
+          'raster-opacity': 0.3
+        }
+      }, 'countries-fill'); // Insert below fill layer
+
+      // Create and add the layer control
+      const layerControl = new LayerControl({
+        collapsed: false,
+        layers: ['countries-fill', 'countries-outline', 'country-points', 'raster-layer'],
+        panelWidth: 320,
+        panelMinWidth: 240,
+        panelMaxWidth: 450
+      });
+
+      map.addControl(layerControl, 'top-right');
+
+      console.log('CDN example loaded successfully!');
+    });
+  </script>
+</body>
+</html>
