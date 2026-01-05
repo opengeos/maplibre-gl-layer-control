@@ -136,13 +136,36 @@ function MapComponent() {
 }
 ```
 
-## API Documentation
+## API
 
-See [docs/API.md](docs/API.md) for complete API documentation.
+### LayerControl Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `collapsed` | `boolean` | `true` | Start with panel collapsed |
+| `layers` | `string[]` | `undefined` | Layer IDs to control (auto-detects all if omitted) |
+| `layerStates` | `Record<string, LayerState>` | `undefined` | Manual layer state configuration |
+| `panelWidth` | `number` | `320` | Initial panel width in pixels |
+| `panelMinWidth` | `number` | `240` | Minimum panel width |
+| `panelMaxWidth` | `number` | `420` | Maximum panel width |
+
+### LayerState
+
+```typescript
+interface LayerState {
+  visible: boolean;    // Layer visibility
+  opacity: number;     // Opacity (0-1)
+  name?: string;       // Display name (auto-generated if omitted)
+}
+```
 
 ## Examples
 
-See [docs/EXAMPLES.md](docs/EXAMPLES.md) for more usage examples.
+See the [examples](./examples) folder for complete working examples:
+
+- **[basic](./examples/basic)** - Simple vanilla JavaScript example
+- **[full-demo](./examples/full-demo)** - Full demo with multiple layer types
+- **[react](./examples/react)** - React integration example
 
 ## Development
 
