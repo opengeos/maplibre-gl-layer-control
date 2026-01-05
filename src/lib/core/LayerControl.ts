@@ -48,6 +48,9 @@ export class LayerControl implements IControl {
       layerStates: options.layerStates || {},
       originalStyles: new Map<string, OriginalStyle>(),
       userInteractingWithSlider: false,
+      backgroundLegendOpen: false,
+      backgroundLayerVisibility: new Map<string, boolean>(),
+      onlyRenderedFilter: false,
     };
 
     this.targetLayers = options.layers || Object.keys(this.state.layerStates);
@@ -609,8 +612,11 @@ export class LayerControl implements IControl {
     row.appendChild(name);
     row.appendChild(opacity);
 
-    // Style button (only for non-Background layers)
-    if (layerId !== 'Background') {
+    // Style button for regular layers, legend button for Background
+    if (layerId === 'Background') {
+      const legendButton = this.createBackgroundLegendButton();
+      row.appendChild(legendButton);
+    } else {
       const styleButton = this.createStyleButton(layerId);
       if (styleButton) {
         row.appendChild(styleButton);
@@ -682,9 +688,22 @@ export class LayerControl implements IControl {
     const styleLayers = this.map.getStyle().layers || [];
     styleLayers.forEach(layer => {
       if (!this.isUserAddedLayer(layer.id)) {
+        // Update visibility cache
+        this.state.backgroundLayerVisibility.set(layer.id, visible);
         this.map.setLayoutProperty(layer.id, 'visibility', visible ? 'visible' : 'none');
       }
     });
+
+    // Update legend panel checkboxes if open
+    if (this.state.backgroundLegendOpen) {
+      const legendPanel = this.panel.querySelector('.layer-control-background-legend');
+      if (legendPanel) {
+        const checkboxes = legendPanel.querySelectorAll('.background-legend-checkbox') as NodeListOf<HTMLInputElement>;
+        checkboxes.forEach(checkbox => {
+          checkbox.checked = visible;
+        });
+      }
+    }
   }
 
   /**
@@ -706,6 +725,355 @@ export class LayerControl implements IControl {
         }
       }
     });
+  }
+
+  // ===== Background Legend Methods =====
+
+  /**
+   * Create legend button for Background layer
+   */
+  private createBackgroundLegendButton(): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.className = 'layer-control-style-button layer-control-background-legend-button';
+    button.innerHTML = '&#9881;'; // Gear icon (same as style button)
+    button.title = 'Show background layer details';
+    button.setAttribute('aria-label', 'Show background layer visibility controls');
+    button.setAttribute('aria-expanded', String(this.state.backgroundLegendOpen));
+
+    button.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleBackgroundLegend();
+    });
+
+    return button;
+  }
+
+  /**
+   * Toggle background legend panel visibility
+   */
+  private toggleBackgroundLegend(): void {
+    if (this.state.backgroundLegendOpen) {
+      this.closeBackgroundLegend();
+    } else {
+      this.openBackgroundLegend();
+    }
+  }
+
+  /**
+   * Open background legend panel
+   */
+  private openBackgroundLegend(): void {
+    // Close any open style editor first
+    if (this.state.activeStyleEditor) {
+      this.closeStyleEditor(this.state.activeStyleEditor);
+    }
+
+    const itemEl = this.panel.querySelector('[data-layer-id="Background"]');
+    if (!itemEl) return;
+
+    // Check if panel already exists
+    let legendPanel = itemEl.querySelector('.layer-control-background-legend');
+    if (legendPanel) {
+      // Refresh the list
+      const layerList = legendPanel.querySelector('.background-legend-layer-list');
+      if (layerList) {
+        this.populateBackgroundLayerList(layerList as HTMLElement);
+      }
+    } else {
+      // Create new panel
+      legendPanel = this.createBackgroundLegendPanel();
+      itemEl.appendChild(legendPanel);
+    }
+
+    this.state.backgroundLegendOpen = true;
+
+    // Update button aria state
+    const button = itemEl.querySelector('.layer-control-background-legend-button');
+    if (button) {
+      button.setAttribute('aria-expanded', 'true');
+      button.classList.add('active');
+    }
+
+    // Scroll into view
+    setTimeout(() => {
+      legendPanel?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 50);
+  }
+
+  /**
+   * Close background legend panel
+   */
+  private closeBackgroundLegend(): void {
+    const itemEl = this.panel.querySelector('[data-layer-id="Background"]');
+    if (!itemEl) return;
+
+    const legendPanel = itemEl.querySelector('.layer-control-background-legend');
+    if (legendPanel) {
+      legendPanel.remove();
+    }
+
+    this.state.backgroundLegendOpen = false;
+
+    // Update button aria state
+    const button = itemEl.querySelector('.layer-control-background-legend-button');
+    if (button) {
+      button.setAttribute('aria-expanded', 'false');
+      button.classList.remove('active');
+    }
+  }
+
+  /**
+   * Create the background legend panel with individual layer controls
+   */
+  private createBackgroundLegendPanel(): HTMLDivElement {
+    const panel = document.createElement('div');
+    panel.className = 'layer-control-background-legend';
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'background-legend-header';
+
+    const title = document.createElement('span');
+    title.className = 'background-legend-title';
+    title.textContent = 'Background Layers';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'background-legend-close';
+    closeBtn.innerHTML = '&times;';
+    closeBtn.title = 'Close';
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.closeBackgroundLegend();
+    });
+
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+
+    // Quick actions row
+    const actionsRow = document.createElement('div');
+    actionsRow.className = 'background-legend-actions';
+
+    const showAllBtn = document.createElement('button');
+    showAllBtn.className = 'background-legend-action-btn';
+    showAllBtn.textContent = 'Show All';
+    showAllBtn.addEventListener('click', () => this.setAllBackgroundLayersVisibility(true));
+
+    const hideAllBtn = document.createElement('button');
+    hideAllBtn.className = 'background-legend-action-btn';
+    hideAllBtn.textContent = 'Hide All';
+    hideAllBtn.addEventListener('click', () => this.setAllBackgroundLayersVisibility(false));
+
+    actionsRow.appendChild(showAllBtn);
+    actionsRow.appendChild(hideAllBtn);
+
+    // Filter row - "Only rendered" checkbox
+    const filterRow = document.createElement('div');
+    filterRow.className = 'background-legend-filter';
+
+    const filterCheckbox = document.createElement('input');
+    filterCheckbox.type = 'checkbox';
+    filterCheckbox.className = 'background-legend-filter-checkbox';
+    filterCheckbox.id = 'background-legend-only-rendered';
+    filterCheckbox.checked = this.state.onlyRenderedFilter;
+    filterCheckbox.addEventListener('change', () => {
+      this.state.onlyRenderedFilter = filterCheckbox.checked;
+      const layerList = panel.querySelector('.background-legend-layer-list');
+      if (layerList) {
+        this.populateBackgroundLayerList(layerList as HTMLElement);
+      }
+    });
+
+    const filterLabel = document.createElement('label');
+    filterLabel.className = 'background-legend-filter-label';
+    filterLabel.htmlFor = 'background-legend-only-rendered';
+    filterLabel.textContent = 'Only rendered';
+
+    filterRow.appendChild(filterCheckbox);
+    filterRow.appendChild(filterLabel);
+
+    // Layer list container (scrollable)
+    const layerList = document.createElement('div');
+    layerList.className = 'background-legend-layer-list';
+
+    // Populate with background layers
+    this.populateBackgroundLayerList(layerList);
+
+    panel.appendChild(header);
+    panel.appendChild(actionsRow);
+    panel.appendChild(filterRow);
+    panel.appendChild(layerList);
+
+    return panel;
+  }
+
+  /**
+   * Check if a layer is currently rendered in the map viewport
+   */
+  private isLayerRendered(layerId: string): boolean {
+    try {
+      const layer = this.map.getLayer(layerId);
+      if (!layer) return false;
+
+      // Check if layer is visible first
+      const visibility = this.map.getLayoutProperty(layerId, 'visibility');
+      if (visibility === 'none') return false;
+
+      // For raster layers, check if tiles are loaded
+      if (layer.type === 'raster' || layer.type === 'hillshade') {
+        // Raster layers are considered rendered if visible
+        return true;
+      }
+
+      // For background layers (solid color), they're always rendered if visible
+      if (layer.type === 'background') {
+        return true;
+      }
+
+      // For vector layers, use queryRenderedFeatures to check if any features are visible
+      const features = this.map.queryRenderedFeatures({ layers: [layerId] });
+      return features.length > 0;
+    } catch (error) {
+      // If query fails, assume layer is rendered if we can see it
+      return true;
+    }
+  }
+
+  /**
+   * Populate the background layer list with individual layers
+   */
+  private populateBackgroundLayerList(container: HTMLElement): void {
+    container.innerHTML = ''; // Clear existing
+
+    const styleLayers = this.map.getStyle().layers || [];
+
+    styleLayers.forEach(layer => {
+      if (!this.isUserAddedLayer(layer.id)) {
+        // If "Only rendered" filter is enabled, skip layers that aren't rendered
+        if (this.state.onlyRenderedFilter && !this.isLayerRendered(layer.id)) {
+          return;
+        }
+
+        // This is a background layer
+        const layerRow = document.createElement('div');
+        layerRow.className = 'background-legend-layer-row';
+        layerRow.setAttribute('data-background-layer-id', layer.id);
+
+        // Checkbox
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'background-legend-checkbox';
+
+        // Get visibility from map or cache
+        const visibility = this.map.getLayoutProperty(layer.id, 'visibility');
+        const isVisible = visibility !== 'none';
+        checkbox.checked = isVisible;
+
+        // Update cache
+        this.state.backgroundLayerVisibility.set(layer.id, isVisible);
+
+        checkbox.addEventListener('change', () => {
+          this.toggleIndividualBackgroundLayer(layer.id, checkbox.checked);
+        });
+
+        // Layer name
+        const name = document.createElement('span');
+        name.className = 'background-legend-layer-name';
+        name.textContent = this.generateFriendlyName(layer.id);
+        name.title = layer.id; // Show full ID on hover
+
+        // Layer type indicator
+        const typeIndicator = document.createElement('span');
+        typeIndicator.className = 'background-legend-layer-type';
+        typeIndicator.textContent = layer.type;
+
+        layerRow.appendChild(checkbox);
+        layerRow.appendChild(name);
+        layerRow.appendChild(typeIndicator);
+        container.appendChild(layerRow);
+      }
+    });
+
+    // Show message if no background layers
+    if (container.children.length === 0) {
+      const emptyMsg = document.createElement('p');
+      emptyMsg.className = 'background-legend-empty';
+      emptyMsg.textContent = this.state.onlyRenderedFilter
+        ? 'No rendered layers in current view.'
+        : 'No background layers found.';
+      container.appendChild(emptyMsg);
+    }
+  }
+
+  /**
+   * Toggle visibility of an individual background layer
+   */
+  private toggleIndividualBackgroundLayer(layerId: string, visible: boolean): void {
+    // Update visibility cache
+    this.state.backgroundLayerVisibility.set(layerId, visible);
+
+    // Apply to map
+    this.map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
+
+    // Update the main Background checkbox state
+    this.updateBackgroundCheckboxState();
+  }
+
+  /**
+   * Set visibility for all background layers
+   */
+  private setAllBackgroundLayersVisibility(visible: boolean): void {
+    const styleLayers = this.map.getStyle().layers || [];
+
+    styleLayers.forEach(layer => {
+      if (!this.isUserAddedLayer(layer.id)) {
+        this.state.backgroundLayerVisibility.set(layer.id, visible);
+        this.map.setLayoutProperty(layer.id, 'visibility', visible ? 'visible' : 'none');
+      }
+    });
+
+    // Update checkboxes in the legend panel
+    const legendPanel = this.panel.querySelector('.layer-control-background-legend');
+    if (legendPanel) {
+      const checkboxes = legendPanel.querySelectorAll('.background-legend-checkbox') as NodeListOf<HTMLInputElement>;
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = visible;
+      });
+    }
+
+    // Update main Background checkbox
+    this.updateBackgroundCheckboxState();
+  }
+
+  /**
+   * Update the main Background checkbox based on individual layer states
+   */
+  private updateBackgroundCheckboxState(): void {
+    const styleLayers = this.map.getStyle().layers || [];
+    let anyVisible = false;
+    let allVisible = true;
+
+    styleLayers.forEach(layer => {
+      if (!this.isUserAddedLayer(layer.id)) {
+        const visible = this.state.backgroundLayerVisibility.get(layer.id);
+        if (visible === true) anyVisible = true;
+        if (visible === false) allVisible = false;
+      }
+    });
+
+    // Update main checkbox
+    const backgroundItem = this.panel.querySelector('[data-layer-id="Background"]');
+    if (backgroundItem) {
+      const checkbox = backgroundItem.querySelector('.layer-control-checkbox') as HTMLInputElement;
+      if (checkbox) {
+        checkbox.checked = anyVisible;
+        checkbox.indeterminate = anyVisible && !allVisible;
+      }
+    }
+
+    // Update layerState
+    if (this.state.layerStates['Background']) {
+      this.state.layerStates['Background'].visible = anyVisible;
+    }
   }
 
   /**

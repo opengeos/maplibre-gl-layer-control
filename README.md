@@ -16,6 +16,7 @@ A comprehensive layer control for MapLibre GL with advanced styling capabilities
   - **Raster layers**: opacity, brightness, saturation, contrast, hue-rotate
 - ✅ **Dynamic layer detection** - Automatically detect and manage new layers
 - ✅ **Background layer grouping** - Control all basemap layers as one group
+- ✅ **Background layer legend** - Gear icon to toggle individual background layer visibility
 - ✅ **Accessibility** - Full ARIA support and keyboard navigation
 - ✅ **TypeScript** - Full type safety and IntelliSense support
 - ✅ **React integration** - Optional React components and hooks
@@ -165,7 +166,20 @@ See the [examples](./examples) folder for complete working examples:
 
 - **[basic](./examples/basic)** - Simple vanilla JavaScript example
 - **[full-demo](./examples/full-demo)** - Full demo with multiple layer types
+- **[background-legend](./examples/background-legend)** - Background layer visibility control
 - **[react](./examples/react)** - React integration example
+
+### Background Layer Legend
+
+When using the `layers` option to specify specific layers, all other layers are grouped under a "Background" entry. The Background layer includes a **gear icon** that opens a detailed legend panel showing:
+
+- Individual visibility toggles for each background layer
+- Layer type indicators (fill, line, symbol, etc.)
+- Quick "Show All" / "Hide All" buttons
+- **"Only rendered" filter** - Shows only layers that are currently rendered in the map viewport
+- Indeterminate checkbox state when some layers are hidden
+
+This allows fine-grained control over which basemap layers are visible while maintaining a simplified layer control interface.
 
 ## Development
 
