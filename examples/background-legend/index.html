@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MapLibre Layer Control - Background Legend Example</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      overflow: hidden;
+    }
+
+    #map {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 100%;
+    }
+
+    .info-panel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: white;
+      padding: 15px;
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      max-width: 300px;
+      z-index: 1;
+    }
+
+    .info-panel h2 {
+      margin: 0 0 10px 0;
+      font-size: 16px;
+      color: #333;
+    }
+
+    .info-panel p {
+      margin: 5px 0;
+      font-size: 13px;
+      color: #666;
+      line-height: 1.4;
+    }
+
+    .info-panel ul {
+      margin: 10px 0;
+      padding-left: 20px;
+      font-size: 13px;
+      color: #666;
+      line-height: 1.6;
+    }
+
+    .info-panel .close-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: none;
+      border: none;
+      font-size: 18px;
+      cursor: pointer;
+      color: #999;
+      padding: 0;
+      width: 20px;
+      height: 20px;
+      line-height: 1;
+    }
+
+    .info-panel .close-btn:hover {
+      color: #333;
+    }
+  </style>
+</head>
+<body>
+  <!-- Info Panel -->
+  <div id="info-panel" class="info-panel">
+    <button class="close-btn" onclick="document.getElementById('info-panel').style.display='none'">&times;</button>
+    <h2>Background Legend Example</h2>
+    <p>This example demonstrates the <strong>Background Layer Legend</strong> feature.</p>
+    <p><strong>How to use:</strong></p>
+    <ul>
+      <li>Click the <strong>layers icon</strong> (top-right) to open the layer control</li>
+      <li>Click the <strong>gear icon</strong> on the "Background" row</li>
+      <li>Toggle individual background layer visibility</li>
+      <li>Use "Show All" / "Hide All" for quick actions</li>
+      <li>Notice the <strong>indeterminate state</strong> on the main checkbox when some layers are hidden</li>
+    </ul>
+  </div>
+
+  <!-- Map Container -->
+  <div id="map"></div>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

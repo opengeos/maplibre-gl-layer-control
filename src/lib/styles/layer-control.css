@@ -642,3 +642,186 @@
   border-color: #374151 !important;
   color: #ffffff !important;
 }
+
+/* ===== Background Legend Panel ===== */
+.layer-control-background-legend {
+  display: block;
+  margin-top: 8px;
+  padding: 10px;
+  background: #f7fafc;
+  border: 1px solid #e0e6ed;
+  border-radius: 4px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.background-legend-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #e0e6ed;
+}
+
+.background-legend-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #333;
+}
+
+.background-legend-close {
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  color: #999;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.2s ease;
+}
+
+.background-legend-close:hover {
+  color: #333;
+}
+
+/* Quick action buttons */
+.background-legend-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.layer-control-background-legend .background-legend-action-btn {
+  flex: 1;
+  padding: 5px 10px;
+  border: 1px solid #2f6fed;
+  border-radius: 3px;
+  background: #2f6fed;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  width: auto;
+  height: auto;
+}
+
+.layer-control-background-legend .background-legend-action-btn:hover {
+  background: #1d5bd6 !important;
+  background-color: #1d5bd6 !important;
+  border-color: #1d5bd6;
+  color: #ffffff;
+}
+
+.layer-control-background-legend .background-legend-action-btn:active {
+  background: #1a4fc2 !important;
+  background-color: #1a4fc2 !important;
+  border-color: #1a4fc2;
+}
+
+/* Filter row */
+.background-legend-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  background: #eef2f7;
+  border-radius: 3px;
+}
+
+.background-legend-filter-checkbox {
+  margin: 0;
+  cursor: pointer;
+}
+
+.background-legend-filter-label {
+  font-size: 11px;
+  color: #444;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Layer list container */
+.background-legend-layer-list {
+  max-height: 200px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* Individual layer row */
+.background-legend-layer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  border-bottom: 1px solid #f0f4f8;
+}
+
+.background-legend-layer-row:last-child {
+  border-bottom: none;
+}
+
+.background-legend-checkbox {
+  margin: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.background-legend-layer-name {
+  flex: 1;
+  font-size: 11px;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.background-legend-layer-type {
+  flex-shrink: 0;
+  font-size: 9px;
+  color: #888;
+  background: #e8ecf0;
+  padding: 2px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+/* Empty state */
+.background-legend-empty {
+  font-size: 11px;
+  color: #888;
+  text-align: center;
+  padding: 12px;
+  margin: 0;
+}
+
+/* Active state for legend button */
+.layer-control-background-legend-button.active {
+  background: #e8ecf0;
+  border-color: #2f6fed;
+  color: #2f6fed;
+}
+
+/* Custom scrollbar for legend layer list */
+.background-legend-layer-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.background-legend-layer-list::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 2px;
+}
+
+.background-legend-layer-list::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 2px;
+}
+
+.background-legend-layer-list::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}

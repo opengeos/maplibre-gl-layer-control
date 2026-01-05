@@ -90,4 +90,10 @@ export interface InternalControlState {
   layerStates: LayerStates;
   originalStyles: Map<string, OriginalStyle>;
   userInteractingWithSlider: boolean;
+  /** Whether the background legend panel is open */
+  backgroundLegendOpen: boolean;
+  /** Individual background layer visibility states */
+  backgroundLayerVisibility: Map<string, boolean>;
+  /** Whether to show only rendered layers in background legend */
+  onlyRenderedFilter: boolean;
 }
