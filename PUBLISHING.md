@@ -165,7 +165,7 @@ Go to your repository on GitHub:
 Document what changed in this version:
 
 ```markdown
-## [0.1.0] - 2024-01-05
+## [0.1.0] - YYYY-MM-DD
 
 ### Added
 - Initial release
