@@ -1,5 +1,9 @@
 # maplibre-gl-layer-control
 
+[![npm version](https://img.shields.io/npm/v/maplibre-gl-layer-control.svg)](https://www.npmjs.com/package/maplibre-gl-layer-control)
+[![npm downloads](https://img.shields.io/npm/dm/maplibre-gl-layer-control.svg)](https://www.npmjs.com/package/maplibre-gl-layer-control)
+[![license](https://img.shields.io/npm/l/maplibre-gl-layer-control.svg)](https://github.com/opengeos/maplibre-gl-layer-control/blob/main/LICENSE)
+
 A comprehensive layer control for MapLibre GL with advanced styling capabilities. Built with TypeScript and React, providing both vanilla JavaScript and React integration options.
 
 ## Features
