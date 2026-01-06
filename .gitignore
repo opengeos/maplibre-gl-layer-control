@@ -35,3 +35,4 @@ dist-examples/
 .env
 .env.local
 .env.*.local
+.vite/
