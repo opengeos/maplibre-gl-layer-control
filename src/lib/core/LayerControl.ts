@@ -350,7 +350,64 @@ export class LayerControl implements IControl {
     const header = this.createPanelHeader();
     panel.appendChild(header);
 
+    // Add action buttons (Show All / Hide All)
+    const actionButtons = this.createActionButtons();
+    panel.appendChild(actionButtons);
+
     return panel;
+  }
+
+  /**
+   * Create action buttons for Show All / Hide All
+   */
+  private createActionButtons(): HTMLElement {
+    const container = document.createElement('div');
+    container.className = 'layer-control-actions';
+
+    const showAllBtn = document.createElement('button');
+    showAllBtn.type = 'button';
+    showAllBtn.className = 'layer-control-action-btn';
+    showAllBtn.textContent = 'Show All';
+    showAllBtn.title = 'Show all layers';
+    showAllBtn.addEventListener('click', () => this.setAllLayersVisibility(true));
+
+    const hideAllBtn = document.createElement('button');
+    hideAllBtn.type = 'button';
+    hideAllBtn.className = 'layer-control-action-btn';
+    hideAllBtn.textContent = 'Hide All';
+    hideAllBtn.title = 'Hide all layers';
+    hideAllBtn.addEventListener('click', () => this.setAllLayersVisibility(false));
+
+    container.appendChild(showAllBtn);
+    container.appendChild(hideAllBtn);
+
+    return container;
+  }
+
+  /**
+   * Set visibility of all layers
+   */
+  private setAllLayersVisibility(visible: boolean): void {
+    Object.keys(this.state.layerStates).forEach(layerId => {
+      if (layerId === 'Background') {
+        // Handle Background layer group
+        this.toggleBackgroundVisibility(visible);
+      } else {
+        // Handle individual layers
+        this.state.layerStates[layerId].visible = visible;
+        this.map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
+      }
+
+      // Update checkbox in UI
+      const itemEl = this.panel.querySelector(`[data-layer-id="${layerId}"]`);
+      if (itemEl) {
+        const checkbox = itemEl.querySelector('.layer-control-checkbox') as HTMLInputElement;
+        if (checkbox) {
+          checkbox.checked = visible;
+          checkbox.indeterminate = false;
+        }
+      }
+    });
   }
 
   /**
