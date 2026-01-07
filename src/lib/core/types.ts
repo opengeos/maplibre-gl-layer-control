@@ -49,6 +49,8 @@ export interface LayerControlOptions {
   showOpacitySlider?: boolean;
   /** Whether to show layer type symbols/icons next to layer names (default: true) */
   showLayerSymbol?: boolean;
+  /** Maximum panel height in pixels (default: 600). When content exceeds this height, the panel becomes scrollable. */
+  panelMaxHeight?: number;
 }
 
 /**

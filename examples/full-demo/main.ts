@@ -137,9 +137,10 @@ map.on('load', () => {
   const layerControl = new LayerControl({
     collapsed: false, // Start expanded to show features
     // layers: ['countries-layer', 'countries-outline', 'country-points', 'raster-layer'],
-    panelWidth: 360,
+    panelWidth: 370,
     panelMinWidth: 240,
     panelMaxWidth: 450,
+    panelMaxHeight: 400,
     showStyleEditor: true,
     showOpacitySlider: true,
   });

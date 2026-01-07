@@ -154,6 +154,7 @@ function MapComponent() {
 | `panelWidth` | `number` | `320` | Initial panel width in pixels |
 | `panelMinWidth` | `number` | `240` | Minimum panel width |
 | `panelMaxWidth` | `number` | `420` | Maximum panel width |
+| `panelMaxHeight` | `number` | `600` | Maximum panel height (scrollable when exceeded) |
 | `showStyleEditor` | `boolean` | `true` | Show gear icon for style editor |
 | `showOpacitySlider` | `boolean` | `true` | Show opacity slider for layers |
 | `showLayerSymbol` | `boolean` | `true` | Show layer type symbols (colored icons) next to layer names |
