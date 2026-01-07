@@ -43,6 +43,10 @@ export interface LayerControlOptions {
   panelMinWidth?: number;
   /** Maximum panel width in pixels (default: 420) */
   panelMaxWidth?: number;
+  /** Whether to show the style editor button (gear icon) for layers (default: true) */
+  showStyleEditor?: boolean;
+  /** Whether to show the opacity slider for layers (default: true) */
+  showOpacitySlider?: boolean;
 }
 
 /**

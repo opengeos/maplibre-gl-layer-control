@@ -139,7 +139,9 @@ map.on('load', () => {
     layers: ['countries-layer', 'countries-outline', 'country-points', 'raster-layer'],
     panelWidth: 340,
     panelMinWidth: 240,
-    panelMaxWidth: 450
+    panelMaxWidth: 450,
+    showStyleEditor: true,
+    showOpacitySlider: true,
   });
 
   // Add the control to the map
