@@ -153,6 +153,41 @@
   pointer-events: none;
 }
 
+/* Action buttons (Show All / Hide All) */
+.layer-control-actions {
+  display: flex;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #e0e0e0;
+  margin-bottom: 4px;
+}
+
+.layer-control-action-btn {
+  flex: 1;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #ffffff !important;
+  background: #2f6fed !important;
+  border: 1px solid #2f6fed !important;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  width: auto;
+  height: auto;
+}
+
+.layer-control-action-btn:hover {
+  background: #1d5bd6 !important;
+  border-color: #1d5bd6 !important;
+  color: #ffffff !important;
+}
+
+.layer-control-action-btn:active {
+  background: #1a4fc2 !important;
+  border-color: #1a4fc2 !important;
+}
+
 /* Layer items */
 .layer-control-item {
   display: flex;
