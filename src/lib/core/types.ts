@@ -51,6 +51,8 @@ export interface LayerControlOptions {
   showLayerSymbol?: boolean;
   /** Maximum panel height in pixels (default: 600). When content exceeds this height, the panel becomes scrollable. */
   panelMaxHeight?: number;
+  /** Whether to exclude drawn layers from drawing libraries like Geoman, Mapbox GL Draw, etc. (default: true) */
+  excludeDrawnLayers?: boolean;
 }
 
 /**
