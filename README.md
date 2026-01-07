@@ -153,6 +153,8 @@ function MapComponent() {
 | `panelWidth` | `number` | `320` | Initial panel width in pixels |
 | `panelMinWidth` | `number` | `240` | Minimum panel width |
 | `panelMaxWidth` | `number` | `420` | Maximum panel width |
+| `showStyleEditor` | `boolean` | `true` | Show gear icon for style editor |
+| `showOpacitySlider` | `boolean` | `true` | Show opacity slider for layers |
 
 ### LayerState
 

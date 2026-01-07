@@ -28,6 +28,8 @@ export class LayerControl implements IControl {
   // Panel width management
   private minPanelWidth: number;
   private maxPanelWidth: number;
+  private showStyleEditor: boolean;
+  private showOpacitySlider: boolean;
   private widthSliderEl: HTMLElement | null = null;
   private widthThumbEl: HTMLElement | null = null;
   private widthValueEl: HTMLElement | null = null;
@@ -40,6 +42,8 @@ export class LayerControl implements IControl {
   constructor(options: LayerControlOptions = {}) {
     this.minPanelWidth = options.panelMinWidth || 240;
     this.maxPanelWidth = options.panelMaxWidth || 420;
+    this.showStyleEditor = options.showStyleEditor !== false;
+    this.showOpacitySlider = options.showOpacitySlider !== false;
 
     this.state = {
       collapsed: options.collapsed !== false,
@@ -457,7 +461,12 @@ export class LayerControl implements IControl {
       this.widthSliderEl.setAttribute('aria-valuenow', String(this.state.panelWidth));
       const ratio = (this.state.panelWidth - this.minPanelWidth) / (this.maxPanelWidth - this.minPanelWidth || 1);
       if (this.widthThumbEl) {
-        const sliderWidth = this.widthSliderEl.clientWidth || 1;
+        const sliderWidth = this.widthSliderEl.clientWidth;
+        // If element not yet rendered, defer the update
+        if (sliderWidth === 0) {
+          requestAnimationFrame(() => this.updateWidthDisplay());
+          return;
+        }
         const thumbWidth = this.widthThumbEl.offsetWidth || 14;
         const padding = 16;
         const available = Math.max(0, sliderWidth - padding - thumbWidth);
@@ -585,41 +594,46 @@ export class LayerControl implements IControl {
     name.textContent = state.name || layerId;
     name.title = state.name || layerId;
 
-    // Opacity slider
-    const opacity = document.createElement('input');
-    opacity.type = 'range';
-    opacity.className = 'layer-control-opacity';
-    opacity.min = '0';
-    opacity.max = '1';
-    opacity.step = '0.01';
-    opacity.value = String(state.opacity);
-    opacity.title = `Opacity: ${Math.round(state.opacity * 100)}%`;
-
-    // Handle slider interaction tracking
-    opacity.addEventListener('mousedown', () => {
-      this.state.userInteractingWithSlider = true;
-    });
-    opacity.addEventListener('mouseup', () => {
-      this.state.userInteractingWithSlider = false;
-    });
-
-    opacity.addEventListener('input', () => {
-      this.changeLayerOpacity(layerId, parseFloat(opacity.value));
-      opacity.title = `Opacity: ${Math.round(parseFloat(opacity.value) * 100)}%`;
-    });
-
     row.appendChild(checkbox);
     row.appendChild(name);
-    row.appendChild(opacity);
+
+    // Opacity slider (conditionally shown)
+    if (this.showOpacitySlider) {
+      const opacity = document.createElement('input');
+      opacity.type = 'range';
+      opacity.className = 'layer-control-opacity';
+      opacity.min = '0';
+      opacity.max = '1';
+      opacity.step = '0.01';
+      opacity.value = String(state.opacity);
+      opacity.title = `Opacity: ${Math.round(state.opacity * 100)}%`;
+
+      // Handle slider interaction tracking
+      opacity.addEventListener('mousedown', () => {
+        this.state.userInteractingWithSlider = true;
+      });
+      opacity.addEventListener('mouseup', () => {
+        this.state.userInteractingWithSlider = false;
+      });
+
+      opacity.addEventListener('input', () => {
+        this.changeLayerOpacity(layerId, parseFloat(opacity.value));
+        opacity.title = `Opacity: ${Math.round(parseFloat(opacity.value) * 100)}%`;
+      });
+
+      row.appendChild(opacity);
+    }
 
     // Style button for regular layers, legend button for Background
-    if (layerId === 'Background') {
-      const legendButton = this.createBackgroundLegendButton();
-      row.appendChild(legendButton);
-    } else {
-      const styleButton = this.createStyleButton(layerId);
-      if (styleButton) {
-        row.appendChild(styleButton);
+    if (this.showStyleEditor) {
+      if (layerId === 'Background') {
+        const legendButton = this.createBackgroundLegendButton();
+        row.appendChild(legendButton);
+      } else {
+        const styleButton = this.createStyleButton(layerId);
+        if (styleButton) {
+          row.appendChild(styleButton);
+        }
       }
     }
 

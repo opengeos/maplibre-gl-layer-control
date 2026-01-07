@@ -38,7 +38,8 @@ map.on('load', () => {
   const layerControl = new LayerControl({
     collapsed: false,
     layerStates,
-    panelWidth: 320
+    panelWidth: 320,
+    showStyleEditor: true
   });
 
   map.addControl(layerControl, 'top-right');
