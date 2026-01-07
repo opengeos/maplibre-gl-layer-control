@@ -158,6 +158,7 @@ function MapComponent() {
 | `showStyleEditor` | `boolean` | `true` | Show gear icon for style editor |
 | `showOpacitySlider` | `boolean` | `true` | Show opacity slider for layers |
 | `showLayerSymbol` | `boolean` | `true` | Show layer type symbols (colored icons) next to layer names |
+| `excludeDrawnLayers` | `boolean` | `true` | Exclude layers from drawing libraries (Geoman, Mapbox GL Draw, etc.) |
 
 ### LayerState
 

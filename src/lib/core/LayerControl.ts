@@ -38,6 +38,7 @@ export class LayerControl implements IControl {
   private showStyleEditor: boolean;
   private showOpacitySlider: boolean;
   private showLayerSymbol: boolean;
+  private excludeDrawnLayers: boolean;
   private widthSliderEl: HTMLElement | null = null;
   private widthThumbEl: HTMLElement | null = null;
   private widthValueEl: HTMLElement | null = null;
@@ -54,6 +55,7 @@ export class LayerControl implements IControl {
     this.showStyleEditor = options.showStyleEditor !== false;
     this.showOpacitySlider = options.showOpacitySlider !== false;
     this.showLayerSymbol = options.showLayerSymbol !== false;
+    this.excludeDrawnLayers = options.excludeDrawnLayers !== false;
 
     this.state = {
       collapsed: options.collapsed !== false,
@@ -132,6 +134,12 @@ export class LayerControl implements IControl {
       allLayerIds.forEach(layerId => {
         const layer = this.map.getLayer(layerId);
         if (!layer) return;
+
+        // Skip drawn layers if excludeDrawnLayers is enabled
+        if (this.excludeDrawnLayers && this.isDrawnLayer(layerId)) {
+          backgroundLayerIds.push(layerId);
+          return;
+        }
 
         // Check if this layer uses a source from the original style
         const sourceId = (layer as any).source;
@@ -307,6 +315,24 @@ export class LayerControl implements IControl {
     name = name.replace(/\b\w/g, char => char.toUpperCase());
 
     return name || layerId; // Fallback to original if empty
+  }
+
+  /**
+   * Check if a layer ID belongs to a drawing library (Geoman, Mapbox GL Draw, etc.)
+   * @param layerId The layer ID to check
+   * @returns true if the layer is from a drawing library
+   */
+  private isDrawnLayer(layerId: string): boolean {
+    const drawnLayerPatterns = [
+      /^gm[-_]/i,                    // Geoman (gm-main-*, gm_*)
+      /^gl-draw[-_]/i,               // Mapbox GL Draw
+      /^mapbox-gl-draw[-_]/i,        // Mapbox GL Draw alternative
+      /^terra-draw[-_]/i,            // Terra Draw
+      /^maplibre-gl-draw[-_]/i,      // MapLibre GL Draw
+      /^draw[-_]layer/i,             // Generic draw layers
+    ];
+
+    return drawnLayerPatterns.some(pattern => pattern.test(layerId));
   }
 
   /**
@@ -1914,6 +1940,11 @@ export class LayerControl implements IControl {
           if (layer) {
             // In auto-detect mode, only add layers using user-added sources
             if (isAutoDetectMode) {
+              // Skip drawn layers if excludeDrawnLayers is enabled
+              if (this.excludeDrawnLayers && this.isDrawnLayer(layerId)) {
+                return;
+              }
+
               const sourceId = (layer as any).source;
               // If no source or source is from original style, skip (it's a background layer)
               if (!sourceId || originalSourceIds.has(sourceId)) {
