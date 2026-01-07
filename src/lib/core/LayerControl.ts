@@ -1,4 +1,4 @@
-import type { IControl, Map as MapLibreMap } from 'maplibre-gl';
+import type { IControl, Map as MapLibreMap, LayerSpecification } from 'maplibre-gl';
 import type {
   LayerControlOptions,
   LayerState,
@@ -9,6 +9,12 @@ import { getLayerType, getLayerOpacity, setLayerOpacity } from '../utils/layerUt
 import { cacheOriginalLayerStyle, restoreOriginalStyle } from '../utils/styleCache';
 import { normalizeColor } from '../utils/colorUtils';
 import { formatNumericValue } from '../utils/formatters';
+import {
+  getLayerColor,
+  getLayerColorFromSpec,
+  createLayerSymbolSVG,
+  createBackgroundGroupSymbolSVG,
+} from '../utils/symbolUtils';
 
 /**
  * LayerControl - A comprehensive layer control for MapLibre GL
@@ -30,6 +36,7 @@ export class LayerControl implements IControl {
   private maxPanelWidth: number;
   private showStyleEditor: boolean;
   private showOpacitySlider: boolean;
+  private showLayerSymbol: boolean;
   private widthSliderEl: HTMLElement | null = null;
   private widthThumbEl: HTMLElement | null = null;
   private widthValueEl: HTMLElement | null = null;
@@ -44,6 +51,7 @@ export class LayerControl implements IControl {
     this.maxPanelWidth = options.panelMaxWidth || 420;
     this.showStyleEditor = options.showStyleEditor !== false;
     this.showOpacitySlider = options.showOpacitySlider !== false;
+    this.showLayerSymbol = options.showLayerSymbol !== false;
 
     this.state = {
       collapsed: options.collapsed !== false,
@@ -751,6 +759,21 @@ export class LayerControl implements IControl {
     name.title = state.name || layerId;
 
     row.appendChild(checkbox);
+
+    // Add layer symbol (if enabled)
+    if (this.showLayerSymbol) {
+      if (layerId === 'Background') {
+        // Special stacked layers symbol for background group
+        const symbol = this.createBackgroundGroupSymbol();
+        row.appendChild(symbol);
+      } else {
+        const symbol = this.createLayerSymbol(layerId);
+        if (symbol) {
+          row.appendChild(symbol);
+        }
+      }
+    }
+
     row.appendChild(name);
 
     // Opacity slider (conditionally shown)
@@ -795,6 +818,60 @@ export class LayerControl implements IControl {
 
     item.appendChild(row);
     this.panel.appendChild(item);
+  }
+
+  /**
+   * Create a symbol element for a layer
+   * @param layerId The layer ID
+   * @returns The symbol HTML element, or null if layer not found
+   */
+  private createLayerSymbol(layerId: string): HTMLElement | null {
+    const layer = this.map.getLayer(layerId);
+    if (!layer) return null;
+
+    const layerType = layer.type;
+    const color = getLayerColor(this.map, layerId, layerType);
+    const svgMarkup = createLayerSymbolSVG(layerType, color);
+
+    const symbolContainer = document.createElement('span');
+    symbolContainer.className = 'layer-control-symbol';
+    symbolContainer.innerHTML = svgMarkup;
+    symbolContainer.title = `Layer type: ${layerType}`;
+
+    return symbolContainer;
+  }
+
+  /**
+   * Create a symbol element for a background layer
+   * @param layer The layer specification
+   * @returns The symbol HTML element
+   */
+  private createBackgroundLayerSymbol(layer: LayerSpecification): HTMLElement {
+    const color = getLayerColorFromSpec(layer);
+    const svgMarkup = createLayerSymbolSVG(layer.type, color, { size: 14 });
+
+    const symbolContainer = document.createElement('span');
+    symbolContainer.className = 'background-legend-layer-symbol';
+    symbolContainer.innerHTML = svgMarkup;
+    symbolContainer.title = `Layer type: ${layer.type}`;
+
+    return symbolContainer;
+  }
+
+  /**
+   * Create a symbol element for the Background layer group
+   * Shows a stacked layers icon to represent multiple background layers
+   * @returns The symbol HTML element
+   */
+  private createBackgroundGroupSymbol(): HTMLElement {
+    const svgMarkup = createBackgroundGroupSymbolSVG(16);
+
+    const symbolContainer = document.createElement('span');
+    symbolContainer.className = 'layer-control-symbol';
+    symbolContainer.innerHTML = svgMarkup;
+    symbolContainer.title = 'Background layers';
+
+    return symbolContainer;
   }
 
   /**
@@ -1157,6 +1234,15 @@ export class LayerControl implements IControl {
         typeIndicator.textContent = layer.type;
 
         layerRow.appendChild(checkbox);
+
+        // Add layer symbol (if enabled)
+        if (this.showLayerSymbol) {
+          const symbol = this.createBackgroundLayerSymbol(layer);
+          if (symbol) {
+            layerRow.appendChild(symbol);
+          }
+        }
+
         layerRow.appendChild(name);
         layerRow.appendChild(typeIndicator);
         container.appendChild(layerRow);

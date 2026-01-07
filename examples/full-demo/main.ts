@@ -137,7 +137,7 @@ map.on('load', () => {
   const layerControl = new LayerControl({
     collapsed: false, // Start expanded to show features
     // layers: ['countries-layer', 'countries-outline', 'country-points', 'raster-layer'],
-    panelWidth: 340,
+    panelWidth: 360,
     panelMinWidth: 240,
     panelMaxWidth: 450,
     showStyleEditor: true,

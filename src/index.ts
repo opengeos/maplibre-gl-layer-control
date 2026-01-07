@@ -16,3 +16,11 @@ export type {
 export { normalizeColor, rgbToHex } from './lib/utils/colorUtils';
 export { getLayerType, getLayerOpacity, setLayerOpacity, isStyleableLayerType } from './lib/utils/layerUtils';
 export { formatNumericValue, clamp } from './lib/utils/formatters';
+export {
+  getLayerColor,
+  getLayerColorFromSpec,
+  createLayerSymbolSVG,
+  createBackgroundGroupSymbolSVG,
+  darkenColor,
+} from './lib/utils/symbolUtils';
+export type { SymbolOptions } from './lib/utils/symbolUtils';

@@ -227,6 +227,22 @@
   white-space: nowrap;
 }
 
+/* Layer symbol/icon */
+.layer-control-symbol {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.layer-control-symbol svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
 .layer-control-opacity {
   flex: 0 0 140px;
   height: 16px;
@@ -806,6 +822,22 @@
   margin: 0;
   cursor: pointer;
   flex-shrink: 0;
+}
+
+/* Layer symbol in background legend */
+.background-legend-layer-symbol {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.background-legend-layer-symbol svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 
 .background-legend-layer-name {
