@@ -136,7 +136,7 @@ map.on('load', () => {
   // Create the layer control with auto-detection
   const layerControl = new LayerControl({
     collapsed: false, // Start expanded to show features
-    layers: ['countries-layer', 'countries-outline', 'country-points', 'raster-layer'],
+    // layers: ['countries-layer', 'countries-outline', 'country-points', 'raster-layer'],
     panelWidth: 340,
     panelMinWidth: 240,
     panelMaxWidth: 450,

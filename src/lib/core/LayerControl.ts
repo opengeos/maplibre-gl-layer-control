@@ -112,20 +112,47 @@ export class LayerControl implements IControl {
     const allLayerIds = style.layers.map(layer => layer.id);
 
     if (this.targetLayers.length === 0) {
-      // No layers specified - show ALL layers individually
+      // No layers specified - auto-detect user-added layers vs background layers
+      // Get the original style's source IDs to determine which layers are from the base style
+      const originalSourceIds = this.getOriginalStyleSourceIds();
+
+      const userAddedLayers: string[] = [];
+      const backgroundLayerIds: string[] = [];
+
       allLayerIds.forEach(layerId => {
         const layer = this.map.getLayer(layerId);
         if (!layer) return;
 
-        // Get visibility
+        // Check if this layer uses a source from the original style
+        const sourceId = (layer as any).source;
+
+        // Layers without a source (like background color layer) are background layers
+        // Layers using sources NOT in the original style are user-added
+        if (!sourceId || originalSourceIds.has(sourceId)) {
+          backgroundLayerIds.push(layerId);
+        } else {
+          userAddedLayers.push(layerId);
+        }
+      });
+
+      // Add Background entry if there are background layers
+      if (backgroundLayerIds.length > 0) {
+        this.state.layerStates['Background'] = {
+          visible: true,
+          opacity: 1.0,
+          name: 'Background'
+        };
+      }
+
+      // Add entries for auto-detected user layers
+      userAddedLayers.forEach(layerId => {
+        const layer = this.map.getLayer(layerId);
+        if (!layer) return;
+
         const visibility = this.map.getLayoutProperty(layerId, 'visibility');
         const isVisible = visibility !== 'none';
-
-        // Get opacity
         const layerType = layer.type;
         const opacity = getLayerOpacity(this.map, layerId, layerType);
-
-        // Generate friendly name from layer ID
         const friendlyName = this.generateFriendlyName(layerId);
 
         this.state.layerStates[layerId] = {
@@ -182,6 +209,78 @@ export class LayerControl implements IControl {
 
     // Update targetLayers to include detected layers
     this.targetLayers = Object.keys(this.state.layerStates);
+  }
+
+  /**
+   * Get the source IDs that were part of the original style (from the style URL)
+   * Sources added via map.addSource() are considered user-added
+   */
+  private getOriginalStyleSourceIds(): Set<string> {
+    const originalSourceIds = new Set<string>();
+    const style = this.map.getStyle();
+    if (!style || !style.sources) return originalSourceIds;
+
+    // Try to determine the style's base URL from sprite or glyphs
+    const spriteUrl = style.sprite as string | undefined;
+    const glyphsUrl = style.glyphs;
+
+    let styleBaseDomain = '';
+    if (spriteUrl) {
+      try {
+        const url = new URL(typeof spriteUrl === 'string' ? spriteUrl : '');
+        styleBaseDomain = url.hostname;
+      } catch {
+        // Ignore URL parsing errors
+      }
+    } else if (glyphsUrl) {
+      try {
+        const url = new URL(glyphsUrl.replace('{fontstack}', 'test').replace('{range}', 'test'));
+        styleBaseDomain = url.hostname;
+      } catch {
+        // Ignore URL parsing errors
+      }
+    }
+
+    // Check each source to determine if it's from the original style
+    Object.entries(style.sources).forEach(([sourceId, source]) => {
+      const src = source as any;
+
+      // Check if this source matches the style's base domain
+      let sourceUrl = src.url || (src.tiles && src.tiles[0]) || '';
+
+      if (sourceUrl) {
+        try {
+          const url = new URL(sourceUrl);
+          // If source is from the same domain as the style, it's original
+          if (styleBaseDomain && url.hostname === styleBaseDomain) {
+            originalSourceIds.add(sourceId);
+            return;
+          }
+          // Common tile providers that are typically part of base styles
+          const basemapDomains = [
+            'demotiles.maplibre.org',
+            'api.maptiler.com',
+            'tiles.stadiamaps.com',
+            'api.mapbox.com',
+            'basemaps.cartocdn.com'
+          ];
+          if (basemapDomains.some(domain => url.hostname.includes(domain))) {
+            originalSourceIds.add(sourceId);
+            return;
+          }
+        } catch {
+          // If URL parsing fails, check other heuristics
+        }
+      }
+
+      // Sources without URL and without data are likely from original style
+      // (e.g., composite sources, or sources defined inline in the style)
+      if (!src.data && !sourceUrl && src.type !== 'geojson') {
+        originalSourceIds.add(sourceId);
+      }
+    });
+
+    return originalSourceIds;
   }
 
   /**
@@ -1644,7 +1743,7 @@ export class LayerControl implements IControl {
   }
 
   /**
-   * Check for new layers and add them to the control
+   * Check for new layers and add them to the control, remove deleted layers
    */
   private checkForNewLayers(): void {
     try {
@@ -1653,27 +1752,60 @@ export class LayerControl implements IControl {
         return;
       }
 
-      const currentMapLayers = style.layers
-        .map(layer => layer.id)
-        .filter(id => {
-          // Exclude basemap layers (those not in layerStates initially)
-          // Include only user-added layers
-          if (this.targetLayers.length > 0) {
-            return this.targetLayers.includes(id);
-          }
-          return true;
-        });
+      const currentMapLayerIds = new Set(style.layers.map(layer => layer.id));
+      const originalSourceIds = this.getOriginalStyleSourceIds();
+
+      // Check if we're in auto-detect mode (no specific layers were specified)
+      const isAutoDetectMode = this.targetLayers.length === 0 ||
+        (this.targetLayers.length === 1 && this.targetLayers[0] === 'Background') ||
+        this.targetLayers.every(id => id === 'Background' || this.state.layerStates[id]);
 
       // Find new layers that aren't in our state yet
       const newLayers: string[] = [];
-      currentMapLayers.forEach(layerId => {
+      currentMapLayerIds.forEach(layerId => {
         if (layerId !== 'Background' && !this.state.layerStates[layerId]) {
           const layer = this.map.getLayer(layerId);
           if (layer) {
+            // In auto-detect mode, only add layers using user-added sources
+            if (isAutoDetectMode) {
+              const sourceId = (layer as any).source;
+              // If no source or source is from original style, skip (it's a background layer)
+              if (!sourceId || originalSourceIds.has(sourceId)) {
+                return;
+              }
+            }
             newLayers.push(layerId);
           }
         }
       });
+
+      // Find removed layers that are still in our state
+      const removedLayers: string[] = [];
+      Object.keys(this.state.layerStates).forEach(layerId => {
+        if (layerId !== 'Background' && !currentMapLayerIds.has(layerId)) {
+          removedLayers.push(layerId);
+        }
+      });
+
+      // Remove deleted layers from UI and state
+      if (removedLayers.length > 0) {
+        removedLayers.forEach(layerId => {
+          // Remove from state
+          delete this.state.layerStates[layerId];
+
+          // Remove from UI
+          const itemEl = this.panel.querySelector(`[data-layer-id="${layerId}"]`);
+          if (itemEl) {
+            itemEl.remove();
+          }
+
+          // Clean up style editor if open
+          if (this.state.activeStyleEditor === layerId) {
+            this.state.activeStyleEditor = null;
+          }
+          this.styleEditors.delete(layerId);
+        });
+      }
 
       // Add UI for new layers
       if (newLayers.length > 0) {
@@ -1691,7 +1823,7 @@ export class LayerControl implements IControl {
           this.state.layerStates[layerId] = {
             visible: isVisible,
             opacity: opacity,
-            name: layerId.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+            name: this.generateFriendlyName(layerId),
           };
 
           // Add to UI
