@@ -34,6 +34,7 @@ export class LayerControl implements IControl {
   // Panel width management
   private minPanelWidth: number;
   private maxPanelWidth: number;
+  private maxPanelHeight: number;
   private showStyleEditor: boolean;
   private showOpacitySlider: boolean;
   private showLayerSymbol: boolean;
@@ -49,6 +50,7 @@ export class LayerControl implements IControl {
   constructor(options: LayerControlOptions = {}) {
     this.minPanelWidth = options.panelMinWidth || 240;
     this.maxPanelWidth = options.panelMaxWidth || 420;
+    this.maxPanelHeight = options.panelMaxHeight || 600;
     this.showStyleEditor = options.showStyleEditor !== false;
     this.showOpacitySlider = options.showOpacitySlider !== false;
     this.showLayerSymbol = options.showLayerSymbol !== false;
@@ -347,8 +349,9 @@ export class LayerControl implements IControl {
     const panel = document.createElement('div');
     panel.className = 'layer-control-panel';
 
-    // Set initial width directly on the element
+    // Set initial width and max height directly on the element
     panel.style.width = `${this.state.panelWidth}px`;
+    panel.style.maxHeight = `${this.maxPanelHeight}px`;
 
     if (!this.state.collapsed) {
       panel.classList.add('expanded');
