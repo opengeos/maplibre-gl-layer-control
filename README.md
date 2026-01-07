@@ -11,6 +11,7 @@ A comprehensive layer control for MapLibre GL with advanced styling capabilities
 - ✅ **Auto-detection** - Automatically detects layer properties (opacity, visibility) and generates friendly names
 - ✅ **Layer visibility toggle** - Checkbox control for each layer
 - ✅ **Layer opacity control** - Smooth opacity slider with type-aware property mapping
+- ✅ **Layer symbols** - Visual type indicators (colored shapes) next to layer names, auto-detected from layer paint properties
 - ✅ **Resizable panel** - Adjustable panel width (240-420px) with keyboard support
 - ✅ **Advanced style editor** - Per-layer-type styling controls:
   - **Fill layers**: color, opacity, outline-color
@@ -155,6 +156,7 @@ function MapComponent() {
 | `panelMaxWidth` | `number` | `420` | Maximum panel width |
 | `showStyleEditor` | `boolean` | `true` | Show gear icon for style editor |
 | `showOpacitySlider` | `boolean` | `true` | Show opacity slider for layers |
+| `showLayerSymbol` | `boolean` | `true` | Show layer type symbols (colored icons) next to layer names |
 
 ### LayerState
 
@@ -174,6 +176,33 @@ See the [examples](./examples) folder for complete working examples:
 - **[full-demo](./examples/full-demo)** - Full demo with multiple layer types
 - **[background-legend](./examples/background-legend)** - Background layer visibility control
 - **[react](./examples/react)** - React integration example
+
+### Layer Symbols
+
+The layer control displays visual symbols (colored icons) next to each layer name to indicate the layer type. Symbols are automatically generated based on the layer's type and paint properties:
+
+| Layer Type | Symbol |
+|------------|--------|
+| `fill` | Colored rectangle with border |
+| `line` | Horizontal line |
+| `circle` | Colored circle |
+| `symbol` | Marker/pin icon |
+| `raster` | Gradient rectangle |
+| `heatmap` | Orange-red gradient |
+| `hillshade` | Gray gradient |
+| `fill-extrusion` | 3D rectangle |
+| `background` | Rectangle with inner border |
+| Background group | Stacked layers icon |
+
+The symbol color is automatically extracted from the layer's paint properties (e.g., `fill-color`, `line-color`, `circle-color`). If a color cannot be determined, a neutral gray is used.
+
+To disable layer symbols:
+
+```typescript
+const layerControl = new LayerControl({
+  showLayerSymbol: false
+});
+```
 
 ### Background Layer Legend
 

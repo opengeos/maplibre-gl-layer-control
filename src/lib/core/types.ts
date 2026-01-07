@@ -47,6 +47,8 @@ export interface LayerControlOptions {
   showStyleEditor?: boolean;
   /** Whether to show the opacity slider for layers (default: true) */
   showOpacitySlider?: boolean;
+  /** Whether to show layer type symbols/icons next to layer names (default: true) */
+  showLayerSymbol?: boolean;
 }
 
 /**
