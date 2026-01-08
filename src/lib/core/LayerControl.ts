@@ -324,7 +324,7 @@ export class LayerControl implements IControl {
    */
   private isDrawnLayer(layerId: string): boolean {
     const drawnLayerPatterns = [
-      /^gm[-_]/i,                    // Geoman (gm-main-*, gm_*)
+      /^gm[-_\s]/i,                  // Geoman (gm-main-*, gm_*, Gm Temporary...)
       /^gl-draw[-_]/i,               // Mapbox GL Draw
       /^mapbox-gl-draw[-_]/i,        // Mapbox GL Draw alternative
       /^terra-draw[-_]/i,            // Terra Draw
@@ -1224,6 +1224,11 @@ export class LayerControl implements IControl {
 
     styleLayers.forEach(layer => {
       if (!this.isUserAddedLayer(layer.id)) {
+        // Skip drawn layers if excludeDrawnLayers is enabled
+        if (this.excludeDrawnLayers && this.isDrawnLayer(layer.id)) {
+          return;
+        }
+
         // If "Only rendered" filter is enabled, skip layers that aren't rendered
         if (this.state.onlyRenderedFilter && !this.isLayerRendered(layer.id)) {
           return;
