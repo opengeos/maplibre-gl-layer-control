@@ -1445,11 +1445,22 @@ export class LayerControl implements IControl {
       return null;
     }
 
+    const layerState = this.state.layerStates[layerId];
+    const isCustomLayer = layerState?.isCustomLayer === true;
+
     const button = document.createElement('button');
     button.className = 'layer-control-style-button';
     button.innerHTML = '&#9881;'; // Gear icon
-    button.title = 'Edit layer style';
-    button.setAttribute('aria-label', `Edit style for ${layerId}`);
+
+    if (isCustomLayer) {
+      // Custom layers don't support style editing
+      button.title = 'Style editing not available for this layer type';
+      button.classList.add('layer-control-style-button-disabled');
+      button.setAttribute('aria-label', `Style editing not available for ${layerId}`);
+    } else {
+      button.title = 'Edit layer style';
+      button.setAttribute('aria-label', `Edit style for ${layerId}`);
+    }
 
     button.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1485,6 +1496,22 @@ export class LayerControl implements IControl {
     const itemEl = this.panel.querySelector(`[data-layer-id="${layerId}"]`);
     if (!itemEl) return;
 
+    // Check if this is a custom layer
+    const layerState = this.state.layerStates[layerId];
+    if (layerState?.isCustomLayer) {
+      // Show info message for custom layers
+      const editor = this.createCustomLayerInfoPanel(layerId, layerState.customLayerType);
+      itemEl.appendChild(editor);
+      this.styleEditors.set(layerId, editor);
+      this.state.activeStyleEditor = layerId;
+
+      // Scroll into view
+      setTimeout(() => {
+        editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 50);
+      return;
+    }
+
     // Cache original style if not already cached
     if (!this.state.originalStyles.has(layerId)) {
       const layer = this.map.getLayer(layerId);
@@ -1505,6 +1532,65 @@ export class LayerControl implements IControl {
     setTimeout(() => {
       editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }, 50);
+  }
+
+  /**
+   * Create info panel for custom layers (style editing not supported)
+   */
+  private createCustomLayerInfoPanel(layerId: string, layerType?: string): HTMLDivElement {
+    const editor = document.createElement('div');
+    editor.className = 'layer-control-style-editor layer-control-custom-info';
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'style-editor-header';
+
+    const title = document.createElement('span');
+    title.className = 'style-editor-title';
+    title.textContent = 'Layer Info';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'style-editor-close';
+    closeBtn.innerHTML = '&times;';
+    closeBtn.title = 'Close';
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.closeStyleEditor(layerId);
+    });
+
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+
+    // Info content
+    const content = document.createElement('div');
+    content.className = 'style-editor-controls';
+
+    const infoText = document.createElement('p');
+    infoText.className = 'layer-control-custom-info-text';
+    const typeLabel = layerType ? layerType.toUpperCase() : 'Custom';
+    infoText.textContent = `This is a ${typeLabel} layer. Style editing is not available for this layer type. Use the visibility toggle and opacity slider to control the layer.`;
+
+    content.appendChild(infoText);
+
+    // Close button
+    const actions = document.createElement('div');
+    actions.className = 'style-editor-actions';
+
+    const closeActionBtn = document.createElement('button');
+    closeActionBtn.className = 'style-editor-button style-editor-button-close';
+    closeActionBtn.textContent = 'Close';
+    closeActionBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.closeStyleEditor(layerId);
+    });
+
+    actions.appendChild(closeActionBtn);
+
+    editor.appendChild(header);
+    editor.appendChild(content);
+    editor.appendChild(actions);
+
+    return editor;
   }
 
   /**
