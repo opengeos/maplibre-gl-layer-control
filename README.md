@@ -25,6 +25,7 @@ A comprehensive layer control for MapLibre GL with advanced styling capabilities
 - ✅ **Accessibility** - Full ARIA support and keyboard navigation
 - ✅ **TypeScript** - Full type safety and IntelliSense support
 - ✅ **React integration** - Optional React components and hooks
+- ✅ **Custom layer adapters** - Integrate non-MapLibre layers (deck.gl, Zarr, etc.)
 
 ## Installation
 
@@ -159,6 +160,7 @@ function MapComponent() {
 | `showOpacitySlider` | `boolean` | `true` | Show opacity slider for layers |
 | `showLayerSymbol` | `boolean` | `true` | Show layer type symbols (colored icons) next to layer names |
 | `excludeDrawnLayers` | `boolean` | `true` | Exclude layers from drawing libraries (Geoman, Mapbox GL Draw, etc.) |
+| `customLayerAdapters` | `CustomLayerAdapter[]` | `undefined` | Adapters for non-MapLibre layers (deck.gl, Zarr, etc.) |
 
 ### LayerState
 
@@ -217,6 +219,156 @@ When using the `layers` option to specify specific layers, all other layers are 
 - Indeterminate checkbox state when some layers are hidden
 
 This allows fine-grained control over which basemap layers are visible while maintaining a simplified layer control interface.
+
+### Custom Layer Adapters
+
+The layer control supports non-MapLibre layers (such as deck.gl or Zarr layers) through the Custom Layer Adapter interface. This allows you to integrate any custom layer type with the layer control's visibility toggle, opacity slider, and layer list.
+
+#### CustomLayerAdapter Interface
+
+```typescript
+interface CustomLayerAdapter {
+  /** Unique type identifier for this adapter (e.g., 'cog', 'zarr', 'deck') */
+  type: string;
+
+  /** Get all layer IDs managed by this adapter */
+  getLayerIds(): string[];
+
+  /** Get the current state of a layer */
+  getLayerState(layerId: string): LayerState | null;
+
+  /** Set layer visibility */
+  setVisibility(layerId: string, visible: boolean): void;
+
+  /** Set layer opacity (0-1) */
+  setOpacity(layerId: string, opacity: number): void;
+
+  /** Get display name for a layer */
+  getName(layerId: string): string;
+
+  /** Get layer symbol type for UI display (optional) */
+  getSymbolType?(layerId: string): string;
+
+  /**
+   * Subscribe to layer changes (add/remove).
+   * Returns an unsubscribe function.
+   */
+  onLayerChange?(callback: (event: 'add' | 'remove', layerId: string) => void): () => void;
+}
+```
+
+#### Implementing a Custom Adapter
+
+Here's an example of implementing an adapter for deck.gl layers:
+
+```typescript
+import type { CustomLayerAdapter, LayerState } from 'maplibre-gl-layer-control';
+import type { MapboxOverlay } from '@deck.gl/mapbox';
+
+class DeckLayerAdapter implements CustomLayerAdapter {
+  readonly type = 'deck';
+
+  private deckOverlay: MapboxOverlay;
+  private deckLayers: Map<string, any>;
+  private changeCallbacks: Array<(event: 'add' | 'remove', layerId: string) => void> = [];
+
+  constructor(deckOverlay: MapboxOverlay, deckLayers: Map<string, any>) {
+    this.deckOverlay = deckOverlay;
+    this.deckLayers = deckLayers;
+  }
+
+  getLayerIds(): string[] {
+    return Array.from(this.deckLayers.keys());
+  }
+
+  getLayerState(layerId: string): LayerState | null {
+    const layer = this.deckLayers.get(layerId);
+    if (!layer?.props) return null;
+
+    return {
+      visible: layer.props.visible !== false,
+      opacity: layer.props.opacity ?? 1,
+      name: this.getName(layerId),
+    };
+  }
+
+  setVisibility(layerId: string, visible: boolean): void {
+    const layer = this.deckLayers.get(layerId);
+    if (!layer?.clone) return;
+
+    // deck.gl layers are immutable; clone with new props
+    const updatedLayer = layer.clone({ visible });
+    this.deckLayers.set(layerId, updatedLayer);
+    this.updateOverlay();
+  }
+
+  setOpacity(layerId: string, opacity: number): void {
+    const layer = this.deckLayers.get(layerId);
+    if (!layer?.clone) return;
+
+    const updatedLayer = layer.clone({ opacity });
+    this.deckLayers.set(layerId, updatedLayer);
+    this.updateOverlay();
+  }
+
+  getName(layerId: string): string {
+    return layerId.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  getSymbolType(): string {
+    return 'raster'; // Use raster symbol for deck.gl layers
+  }
+
+  onLayerChange(callback: (event: 'add' | 'remove', layerId: string) => void): () => void {
+    this.changeCallbacks.push(callback);
+    return () => {
+      const idx = this.changeCallbacks.indexOf(callback);
+      if (idx >= 0) this.changeCallbacks.splice(idx, 1);
+    };
+  }
+
+  // Call this when layers are added/removed
+  notifyLayerAdded(layerId: string): void {
+    this.changeCallbacks.forEach(cb => cb('add', layerId));
+  }
+
+  notifyLayerRemoved(layerId: string): void {
+    this.changeCallbacks.forEach(cb => cb('remove', layerId));
+  }
+
+  private updateOverlay(): void {
+    this.deckOverlay.setProps({ layers: Array.from(this.deckLayers.values()) });
+  }
+}
+```
+
+#### Using Custom Adapters
+
+Pass your custom adapters to the `customLayerAdapters` option:
+
+```typescript
+import { LayerControl } from 'maplibre-gl-layer-control';
+
+// Create your custom adapter
+const deckAdapter = new DeckLayerAdapter(deckOverlay, deckLayers);
+
+// Create the layer control with the adapter
+const layerControl = new LayerControl({
+  collapsed: false,
+  customLayerAdapters: [deckAdapter]
+});
+
+map.addControl(layerControl, 'top-right');
+
+// When you add a new deck.gl layer, notify the adapter
+deckLayers.set('my-deck-layer', myDeckLayer);
+deckAdapter.notifyLayerAdded('my-deck-layer');
+```
+
+#### Limitations
+
+- **Style Editor**: The style editor (gear icon) is not available for custom layers since they don't use MapLibre's paint properties. Clicking the gear icon will show an info panel explaining this.
+- **Opacity Support**: Some layer types (like deck.gl's COGLayer) may not support dynamic opacity changes due to underlying library limitations. In these cases, the opacity slider will have no effect.
 
 ## Development
 
