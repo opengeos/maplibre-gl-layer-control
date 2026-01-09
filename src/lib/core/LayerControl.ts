@@ -62,7 +62,7 @@ export class LayerControl implements IControl {
 
     this.state = {
       collapsed: options.collapsed !== false,
-      panelWidth: options.panelWidth || 320,
+      panelWidth: options.panelWidth || 348,
       activeStyleEditor: null,
       layerStates: options.layerStates || {},
       originalStyles: new Map<string, OriginalStyle>(),
