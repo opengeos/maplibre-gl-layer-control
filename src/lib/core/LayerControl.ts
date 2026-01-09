@@ -1498,7 +1498,7 @@ export class LayerControl implements IControl {
     const layerState = this.state.layerStates[layerId];
     if (layerState?.isCustomLayer) {
       // Show info message for custom layers
-      const editor = this.createCustomLayerInfoPanel(layerId, layerState.customLayerType);
+      const editor = this.createCustomLayerInfoPanel(layerId);
       itemEl.appendChild(editor);
       this.styleEditors.set(layerId, editor);
       this.state.activeStyleEditor = layerId;
@@ -1535,7 +1535,7 @@ export class LayerControl implements IControl {
   /**
    * Create info panel for custom layers (style editing not supported)
    */
-  private createCustomLayerInfoPanel(layerId: string, layerType?: string): HTMLDivElement {
+  private createCustomLayerInfoPanel(layerId: string): HTMLDivElement {
     const editor = document.createElement('div');
     editor.className = 'layer-control-style-editor layer-control-custom-info';
 
