@@ -91,6 +91,6 @@
     "vitest": "^2.1.0"
   },
   "dependencies": {
-    "maplibre-gl-layer-control": "^0.2.0"
+    "maplibre-gl-layer-control": "^0.5.1"
   }
 }

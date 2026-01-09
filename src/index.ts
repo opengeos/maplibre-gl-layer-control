@@ -3,6 +3,7 @@ import './lib/styles/layer-control.css';
 
 // Main entry point
 export { LayerControl } from './lib/core/LayerControl';
+export { CustomLayerRegistry } from './lib/core/CustomLayerRegistry';
 export type {
   LayerControlOptions,
   LayerState,
@@ -10,6 +11,7 @@ export type {
   StyleableLayerType,
   PaintProperty,
   StyleControlConfig,
+  CustomLayerAdapter,
 } from './lib/core/types';
 
 // Re-export utilities for advanced use cases

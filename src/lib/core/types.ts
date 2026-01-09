@@ -10,6 +10,10 @@ export interface LayerState {
   opacity: number;
   /** Display name for the layer */
   name: string;
+  /** Whether this is a custom (non-MapLibre) layer */
+  isCustomLayer?: boolean;
+  /** Custom layer type identifier (e.g., 'cog', 'zarr') */
+  customLayerType?: string;
 }
 
 /**
@@ -17,6 +21,40 @@ export interface LayerState {
  */
 export interface LayerStates {
   [layerId: string]: LayerState;
+}
+
+/**
+ * Adapter interface for custom (non-MapLibre) layers.
+ * Implement this interface to integrate custom layer types (e.g., deck.gl layers)
+ * with the layer control.
+ */
+export interface CustomLayerAdapter {
+  /** Unique type identifier for this adapter (e.g., 'cog', 'zarr', 'deck') */
+  type: string;
+
+  /** Get all layer IDs managed by this adapter */
+  getLayerIds(): string[];
+
+  /** Get the current state of a layer */
+  getLayerState(layerId: string): LayerState | null;
+
+  /** Set layer visibility */
+  setVisibility(layerId: string, visible: boolean): void;
+
+  /** Set layer opacity (0-1) */
+  setOpacity(layerId: string, opacity: number): void;
+
+  /** Get display name for a layer */
+  getName(layerId: string): string;
+
+  /** Get layer symbol type for UI display (optional) */
+  getSymbolType?(layerId: string): string;
+
+  /**
+   * Subscribe to layer changes (add/remove).
+   * Returns an unsubscribe function.
+   */
+  onLayerChange?(callback: (event: 'add' | 'remove', layerId: string) => void): () => void;
 }
 
 /**
@@ -53,6 +91,8 @@ export interface LayerControlOptions {
   panelMaxHeight?: number;
   /** Whether to exclude drawn layers from drawing libraries like Geoman, Mapbox GL Draw, etc. (default: true) */
   excludeDrawnLayers?: boolean;
+  /** Custom layer adapters for non-MapLibre layers (e.g., deck.gl COG layers, Zarr layers) */
+  customLayerAdapters?: CustomLayerAdapter[];
 }
 
 /**

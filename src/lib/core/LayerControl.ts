@@ -5,6 +5,7 @@ import type {
   OriginalStyle,
   InternalControlState,
 } from './types';
+import { CustomLayerRegistry } from './CustomLayerRegistry';
 import { getLayerType, getLayerOpacity, setLayerOpacity } from '../utils/layerUtils';
 import { cacheOriginalLayerStyle, restoreOriginalStyle } from '../utils/styleCache';
 import { normalizeColor } from '../utils/colorUtils';
@@ -39,6 +40,8 @@ export class LayerControl implements IControl {
   private showOpacitySlider: boolean;
   private showLayerSymbol: boolean;
   private excludeDrawnLayers: boolean;
+  private customLayerRegistry: CustomLayerRegistry | null = null;
+  private customLayerUnsubscribe: (() => void) | null = null;
   private widthSliderEl: HTMLElement | null = null;
   private widthThumbEl: HTMLElement | null = null;
   private widthValueEl: HTMLElement | null = null;
@@ -59,7 +62,7 @@ export class LayerControl implements IControl {
 
     this.state = {
       collapsed: options.collapsed !== false,
-      panelWidth: options.panelWidth || 320,
+      panelWidth: options.panelWidth || 348,
       activeStyleEditor: null,
       layerStates: options.layerStates || {},
       originalStyles: new Map<string, OriginalStyle>(),
@@ -71,6 +74,14 @@ export class LayerControl implements IControl {
 
     this.targetLayers = options.layers || Object.keys(this.state.layerStates);
     this.styleEditors = new Map<string, HTMLElement>();
+
+    // Initialize custom layer registry if adapters are provided
+    if (options.customLayerAdapters && options.customLayerAdapters.length > 0) {
+      this.customLayerRegistry = new CustomLayerRegistry();
+      options.customLayerAdapters.forEach(adapter => {
+        this.customLayerRegistry!.register(adapter);
+      });
+    }
   }
 
   /**
@@ -107,6 +118,16 @@ export class LayerControl implements IControl {
    * Called when the control is removed from the map
    */
   onRemove(): void {
+    // Clean up custom layer registry subscription
+    if (this.customLayerUnsubscribe) {
+      this.customLayerUnsubscribe();
+      this.customLayerUnsubscribe = null;
+    }
+    if (this.customLayerRegistry) {
+      this.customLayerRegistry.destroy();
+      this.customLayerRegistry = null;
+    }
+
     this.container.parentNode?.removeChild(this.container);
     // Cleanup will be handled by garbage collection
   }
@@ -222,6 +243,26 @@ export class LayerControl implements IControl {
           opacity: opacity,
           name: friendlyName
         };
+      });
+    }
+
+    // Detect custom layers from registry
+    if (this.customLayerRegistry) {
+      const customLayerIds = this.customLayerRegistry.getAllLayerIds();
+      customLayerIds.forEach(layerId => {
+        // Skip if already in state
+        if (this.state.layerStates[layerId]) return;
+
+        const customState = this.customLayerRegistry!.getLayerState(layerId);
+        if (customState) {
+          this.state.layerStates[layerId] = {
+            visible: customState.visible,
+            opacity: customState.opacity,
+            name: customState.name,
+            isCustomLayer: true,
+            customLayerType: this.customLayerRegistry!.getSymbolType(layerId) || undefined,
+          };
+        }
       });
     }
 
@@ -426,14 +467,8 @@ export class LayerControl implements IControl {
    */
   private setAllLayersVisibility(visible: boolean): void {
     Object.keys(this.state.layerStates).forEach(layerId => {
-      if (layerId === 'Background') {
-        // Handle Background layer group
-        this.toggleBackgroundVisibility(visible);
-      } else {
-        // Handle individual layers
-        this.state.layerStates[layerId].visible = visible;
-        this.map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
-      }
+      // Use toggleLayerVisibility which handles both native and custom layers
+      this.toggleLayerVisibility(layerId, visible);
 
       // Update checkbox in UI
       const itemEl = this.panel.querySelector(`[data-layer-id="${layerId}"]`);
@@ -715,6 +750,13 @@ export class LayerControl implements IControl {
         }, 150);
       }
     });
+
+    // Subscribe to custom layer registry changes
+    if (this.customLayerRegistry) {
+      this.customLayerUnsubscribe = this.customLayerRegistry.onChange(() => {
+        setTimeout(() => this.checkForNewLayers(), 100);
+      });
+    }
   }
 
   /**
@@ -855,6 +897,23 @@ export class LayerControl implements IControl {
    * @returns The symbol HTML element, or null if layer not found
    */
   private createLayerSymbol(layerId: string): HTMLElement | null {
+    // Check if it's a custom layer first
+    const layerState = this.state.layerStates[layerId];
+    if (layerState?.isCustomLayer) {
+      const symbolType = layerState.customLayerType || 'custom-raster';
+      // Use a default color for custom layers
+      const color = '#4a90d9';
+      const svgMarkup = createLayerSymbolSVG(symbolType, color);
+
+      const symbolContainer = document.createElement('span');
+      symbolContainer.className = 'layer-control-symbol';
+      symbolContainer.innerHTML = svgMarkup;
+      symbolContainer.title = `Layer type: ${symbolType}`;
+
+      return symbolContainer;
+    }
+
+    // Fall back to MapLibre layer
     const layer = this.map.getLayer(layerId);
     if (!layer) return null;
 
@@ -918,7 +977,12 @@ export class LayerControl implements IControl {
       this.state.layerStates[layerId].visible = visible;
     }
 
-    // Update map
+    // Try custom layer registry first
+    if (this.customLayerRegistry?.setVisibility(layerId, visible)) {
+      return;
+    }
+
+    // Fallback to native MapLibre layer
     this.map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
   }
 
@@ -937,7 +1001,12 @@ export class LayerControl implements IControl {
       this.state.layerStates[layerId].opacity = opacity;
     }
 
-    // Get layer type and set appropriate opacity property
+    // Try custom layer registry first
+    if (this.customLayerRegistry?.setOpacity(layerId, opacity)) {
+      return;
+    }
+
+    // Fallback to native MapLibre layer
     const layerType = getLayerType(this.map, layerId);
     if (layerType) {
       setLayerOpacity(this.map, layerId, layerType, opacity);
@@ -1375,11 +1444,21 @@ export class LayerControl implements IControl {
       return null;
     }
 
+    const layerState = this.state.layerStates[layerId];
+    const isCustomLayer = layerState?.isCustomLayer === true;
+
     const button = document.createElement('button');
     button.className = 'layer-control-style-button';
     button.innerHTML = '&#9881;'; // Gear icon
-    button.title = 'Edit layer style';
-    button.setAttribute('aria-label', `Edit style for ${layerId}`);
+
+    if (isCustomLayer) {
+      // Custom layers don't support style editing - show info panel instead
+      button.title = 'Layer info (style editing not available)';
+      button.setAttribute('aria-label', `Layer info for ${layerId}`);
+    } else {
+      button.title = 'Edit layer style';
+      button.setAttribute('aria-label', `Edit style for ${layerId}`);
+    }
 
     button.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1415,6 +1494,22 @@ export class LayerControl implements IControl {
     const itemEl = this.panel.querySelector(`[data-layer-id="${layerId}"]`);
     if (!itemEl) return;
 
+    // Check if this is a custom layer
+    const layerState = this.state.layerStates[layerId];
+    if (layerState?.isCustomLayer) {
+      // Show info message for custom layers
+      const editor = this.createCustomLayerInfoPanel(layerId, layerState.customLayerType);
+      itemEl.appendChild(editor);
+      this.styleEditors.set(layerId, editor);
+      this.state.activeStyleEditor = layerId;
+
+      // Scroll into view
+      setTimeout(() => {
+        editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 50);
+      return;
+    }
+
     // Cache original style if not already cached
     if (!this.state.originalStyles.has(layerId)) {
       const layer = this.map.getLayer(layerId);
@@ -1435,6 +1530,65 @@ export class LayerControl implements IControl {
     setTimeout(() => {
       editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }, 50);
+  }
+
+  /**
+   * Create info panel for custom layers (style editing not supported)
+   */
+  private createCustomLayerInfoPanel(layerId: string, layerType?: string): HTMLDivElement {
+    const editor = document.createElement('div');
+    editor.className = 'layer-control-style-editor layer-control-custom-info';
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'style-editor-header';
+
+    const title = document.createElement('span');
+    title.className = 'style-editor-title';
+    title.textContent = 'Layer Info';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'style-editor-close';
+    closeBtn.innerHTML = '&times;';
+    closeBtn.title = 'Close';
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.closeStyleEditor(layerId);
+    });
+
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+
+    // Info content
+    const content = document.createElement('div');
+    content.className = 'style-editor-controls';
+
+    const infoText = document.createElement('p');
+    infoText.className = 'layer-control-custom-info-text';
+    const typeLabel = layerType ? layerType.toUpperCase() : 'Custom';
+    infoText.textContent = `This is a ${typeLabel} layer. Style editing is not available for this layer type. Use the visibility toggle and opacity slider to control the layer.`;
+
+    content.appendChild(infoText);
+
+    // Close button
+    const actions = document.createElement('div');
+    actions.className = 'style-editor-actions';
+
+    const closeActionBtn = document.createElement('button');
+    closeActionBtn.className = 'style-editor-button style-editor-button-close';
+    closeActionBtn.textContent = 'Close';
+    closeActionBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.closeStyleEditor(layerId);
+    });
+
+    actions.appendChild(closeActionBtn);
+
+    editor.appendChild(header);
+    editor.appendChild(content);
+    editor.appendChild(actions);
+
+    return editor;
   }
 
   /**
@@ -1871,6 +2025,16 @@ export class LayerControl implements IControl {
 
     Object.keys(this.state.layerStates).forEach(layerId => {
       try {
+        // Skip custom layers - they manage their own state via adapters
+        if (this.state.layerStates[layerId]?.isCustomLayer) {
+          return;
+        }
+
+        // Skip Background layer group
+        if (layerId === 'Background') {
+          return;
+        }
+
         const layer = this.map.getLayer(layerId);
         if (!layer) return;
 
@@ -1962,9 +2126,12 @@ export class LayerControl implements IControl {
       });
 
       // Find removed layers that are still in our state
+      // Skip custom layers - they have their own removal mechanism via the adapter
       const removedLayers: string[] = [];
       Object.keys(this.state.layerStates).forEach(layerId => {
-        if (layerId !== 'Background' && !currentMapLayerIds.has(layerId)) {
+        const state = this.state.layerStates[layerId];
+        // Skip Background, custom layers, and layers still in the map
+        if (layerId !== 'Background' && !state.isCustomLayer && !currentMapLayerIds.has(layerId)) {
           removedLayers.push(layerId);
         }
       });
@@ -2010,6 +2177,49 @@ export class LayerControl implements IControl {
 
           // Add to UI
           this.addLayerItem(layerId, this.state.layerStates[layerId]);
+        });
+      }
+
+      // Check for new/removed custom layers
+      if (this.customLayerRegistry) {
+        const customLayerIds = this.customLayerRegistry.getAllLayerIds();
+
+        // Find new custom layers
+        customLayerIds.forEach(layerId => {
+          if (!this.state.layerStates[layerId]) {
+            const customState = this.customLayerRegistry!.getLayerState(layerId);
+            if (customState) {
+              this.state.layerStates[layerId] = {
+                visible: customState.visible,
+                opacity: customState.opacity,
+                name: customState.name,
+                isCustomLayer: true,
+                customLayerType: this.customLayerRegistry!.getSymbolType(layerId) || undefined,
+              };
+              this.addLayerItem(layerId, this.state.layerStates[layerId]);
+            }
+          }
+        });
+
+        // Find removed custom layers
+        Object.keys(this.state.layerStates).forEach(layerId => {
+          const state = this.state.layerStates[layerId];
+          if (state.isCustomLayer && !customLayerIds.includes(layerId)) {
+            // Remove from state
+            delete this.state.layerStates[layerId];
+
+            // Remove from UI
+            const itemEl = this.panel.querySelector(`[data-layer-id="${layerId}"]`);
+            if (itemEl) {
+              itemEl.remove();
+            }
+
+            // Clean up style editor if open
+            if (this.state.activeStyleEditor === layerId) {
+              this.state.activeStyleEditor = null;
+            }
+            this.styleEditors.delete(layerId);
+          }
         });
       }
     } catch (error) {

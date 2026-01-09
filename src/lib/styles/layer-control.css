@@ -894,3 +894,15 @@
 .background-legend-layer-list::-webkit-scrollbar-thumb:hover {
   background: #a8a8a8;
 }
+
+/* Custom layer info panel */
+.layer-control-custom-info-text {
+  margin: 0;
+  padding: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #666;
+  background: #f0f4f8;
+  border-radius: 4px;
+  border-left: 3px solid #2f6fed;
+}
