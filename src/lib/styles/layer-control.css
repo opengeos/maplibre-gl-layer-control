@@ -895,18 +895,6 @@
   background: #a8a8a8;
 }
 
-/* Custom layer style button - disabled state */
-.layer-control-style-button-disabled {
-  opacity: 0.5;
-  cursor: help;
-}
-
-.layer-control-style-button-disabled:hover {
-  background: transparent;
-  border-color: #ddd;
-  color: #666;
-}
-
 /* Custom layer info panel */
 .layer-control-custom-info-text {
   margin: 0;

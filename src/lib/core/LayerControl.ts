@@ -467,14 +467,8 @@ export class LayerControl implements IControl {
    */
   private setAllLayersVisibility(visible: boolean): void {
     Object.keys(this.state.layerStates).forEach(layerId => {
-      if (layerId === 'Background') {
-        // Handle Background layer group
-        this.toggleBackgroundVisibility(visible);
-      } else {
-        // Handle individual layers
-        this.state.layerStates[layerId].visible = visible;
-        this.map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
-      }
+      // Use toggleLayerVisibility which handles both native and custom layers
+      this.toggleLayerVisibility(layerId, visible);
 
       // Update checkbox in UI
       const itemEl = this.panel.querySelector(`[data-layer-id="${layerId}"]`);
@@ -1453,10 +1447,9 @@ export class LayerControl implements IControl {
     button.innerHTML = '&#9881;'; // Gear icon
 
     if (isCustomLayer) {
-      // Custom layers don't support style editing
-      button.title = 'Style editing not available for this layer type';
-      button.classList.add('layer-control-style-button-disabled');
-      button.setAttribute('aria-label', `Style editing not available for ${layerId}`);
+      // Custom layers don't support style editing - show info panel instead
+      button.title = 'Layer info (style editing not available)';
+      button.setAttribute('aria-label', `Layer info for ${layerId}`);
     } else {
       button.title = 'Edit layer style';
       button.setAttribute('aria-label', `Edit style for ${layerId}`);
@@ -2027,6 +2020,16 @@ export class LayerControl implements IControl {
 
     Object.keys(this.state.layerStates).forEach(layerId => {
       try {
+        // Skip custom layers - they manage their own state via adapters
+        if (this.state.layerStates[layerId]?.isCustomLayer) {
+          return;
+        }
+
+        // Skip Background layer group
+        if (layerId === 'Background') {
+          return;
+        }
+
         const layer = this.map.getLayer(layerId);
         if (!layer) return;
 
