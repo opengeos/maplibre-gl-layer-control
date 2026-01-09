@@ -314,6 +314,61 @@ function createDefaultSymbol(size: number, color: string): string {
 }
 
 /**
+ * Create a COG (Cloud Optimized GeoTIFF) symbol
+ * Grid pattern representing raster tiles
+ */
+function createCOGSymbol(size: number, color: string): string {
+  const padding = 2;
+  const borderColor = darkenColor(color, 0.3);
+  const cellSize = (size - padding * 2) / 2;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
+    <rect x="${padding}" y="${padding}" width="${cellSize}" height="${cellSize}" fill="${color}" stroke="${borderColor}" stroke-width="0.5"/>
+    <rect x="${padding + cellSize}" y="${padding}" width="${cellSize}" height="${cellSize}" fill="${color}" stroke="${borderColor}" stroke-width="0.5" opacity="0.8"/>
+    <rect x="${padding}" y="${padding + cellSize}" width="${cellSize}" height="${cellSize}" fill="${color}" stroke="${borderColor}" stroke-width="0.5" opacity="0.6"/>
+    <rect x="${padding + cellSize}" y="${padding + cellSize}" width="${cellSize}" height="${cellSize}" fill="${color}" stroke="${borderColor}" stroke-width="0.5" opacity="0.4"/>
+  </svg>`;
+}
+
+/**
+ * Create a Zarr symbol
+ * Layered grid pattern representing multidimensional data
+ */
+function createZarrSymbol(size: number, color: string): string {
+  const padding = 2;
+  const borderColor = darkenColor(color, 0.3);
+  const innerSize = size - padding * 2;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
+    <rect x="${padding + 2}" y="${padding}" width="${innerSize - 2}" height="${innerSize - 2}" fill="${darkenColor(color, 0.2)}" stroke="${borderColor}" stroke-width="0.5" rx="1"/>
+    <rect x="${padding + 1}" y="${padding + 1}" width="${innerSize - 2}" height="${innerSize - 2}" fill="${darkenColor(color, 0.1)}" stroke="${borderColor}" stroke-width="0.5" rx="1"/>
+    <rect x="${padding}" y="${padding + 2}" width="${innerSize - 2}" height="${innerSize - 2}" fill="${color}" stroke="${borderColor}" stroke-width="0.5" rx="1"/>
+    <line x1="${padding + 3}" y1="${padding + 5}" x2="${padding + innerSize - 5}" y2="${padding + 5}" stroke="${borderColor}" stroke-width="0.5" opacity="0.5"/>
+    <line x1="${padding + 3}" y1="${padding + 8}" x2="${padding + innerSize - 5}" y2="${padding + 8}" stroke="${borderColor}" stroke-width="0.5" opacity="0.5"/>
+  </svg>`;
+}
+
+/**
+ * Create a generic custom raster symbol
+ * Gradient grid representing custom raster layers
+ */
+function createCustomRasterSymbol(size: number, color: string): string {
+  const padding = 2;
+  const borderColor = darkenColor(color, 0.3);
+  const id = `customRasterGrad_${Math.random().toString(36).slice(2, 9)}`;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="${id}" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="${color}"/>
+        <stop offset="100%" stop-color="${darkenColor(color, 0.4)}"/>
+      </linearGradient>
+    </defs>
+    <rect x="${padding}" y="${padding}" width="${size - padding * 2}" height="${size - padding * 2}"
+          fill="url(#${id})" stroke="${borderColor}" stroke-width="1" rx="1"/>
+    <line x1="${size / 2}" y1="${padding}" x2="${size / 2}" y2="${size - padding}" stroke="${borderColor}" stroke-width="0.5" opacity="0.3"/>
+    <line x1="${padding}" y1="${size / 2}" x2="${size - padding}" y2="${size / 2}" stroke="${borderColor}" stroke-width="0.5" opacity="0.3"/>
+  </svg>`;
+}
+
+/**
  * Create a stacked layers symbol for background layer groups
  * Shows multiple overlapping rectangles to represent multiple layers
  */
@@ -375,6 +430,12 @@ export function createLayerSymbolSVG(
       return createFillExtrusionSymbol(size, fillColor);
     case 'background-group':
       return createStackedLayersSymbol(size);
+    case 'cog':
+      return createCOGSymbol(size, fillColor);
+    case 'zarr':
+      return createZarrSymbol(size, fillColor);
+    case 'custom-raster':
+      return createCustomRasterSymbol(size, fillColor);
     default:
       return createDefaultSymbol(size, fillColor);
   }
