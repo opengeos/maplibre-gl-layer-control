@@ -1565,8 +1565,7 @@ export class LayerControl implements IControl {
 
     const infoText = document.createElement('p');
     infoText.className = 'layer-control-custom-info-text';
-    const typeLabel = layerType ? layerType.toUpperCase() : 'Custom';
-    infoText.textContent = `This is a ${typeLabel} layer. Style editing is not available for this layer type. Use the visibility toggle and opacity slider to control the layer.`;
+    infoText.textContent = `This is a custom layer. Style editing is not available for this layer type. Use the visibility toggle and opacity slider to control the layer.`;
 
     content.appendChild(infoText);
 
