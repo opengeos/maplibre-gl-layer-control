@@ -4,6 +4,7 @@ import type {
   LayerState,
   OriginalStyle,
   InternalControlState,
+  CustomLayerAdapter,
 } from './types';
 import { CustomLayerRegistry } from './CustomLayerRegistry';
 import { getLayerType, getLayerOpacity, setLayerOpacity } from '../utils/layerUtils';
@@ -36,6 +37,7 @@ export class LayerControl implements IControl {
   private state: InternalControlState;
   private targetLayers: string[];
   private styleEditors: Map<string, HTMLElement>;
+  private initialSourceIds: Set<string> | null = null;
 
   // Panel width management
   private minPanelWidth: number;
@@ -67,7 +69,7 @@ export class LayerControl implements IControl {
 
     this.state = {
       collapsed: options.collapsed !== false,
-      panelWidth: options.panelWidth || 348,
+      panelWidth: options.panelWidth || 360,
       activeStyleEditor: null,
       layerStates: options.layerStates || {},
       originalStyles: new Map<string, OriginalStyle>(),
@@ -95,6 +97,15 @@ export class LayerControl implements IControl {
   onAdd(map: MapLibreMap): HTMLElement {
     this.map = map;
     this.mapContainer = map.getContainer();
+
+    // Capture initial source IDs (basemap sources) before auto-detecting layers
+    // Sources added after this point are considered user-added
+    const style = this.map.getStyle();
+    if (style && style.sources) {
+      this.initialSourceIds = new Set(Object.keys(style.sources));
+    } else {
+      this.initialSourceIds = new Set();
+    }
 
     // Auto-detect layers using source-based heuristics
     if (Object.keys(this.state.layerStates).length === 0) {
@@ -301,9 +312,11 @@ export class LayerControl implements IControl {
   /**
    * Detect which sources are user-added (not from the basemap style)
    * User-added sources are identified by:
-   * - GeoJSON sources with inline data objects (not URL strings)
-   * - Image, video, canvas sources (always user-added)
-   * - Raster, raster-dem, vector sources from non-basemap tile providers
+   * - Sources that were NOT present when the control was first added
+   * - Additionally for sources added later:
+   *   - GeoJSON sources with inline data objects (not URL strings)
+   *   - Image, video, canvas sources
+   *   - Raster, raster-dem, vector sources from non-basemap tile providers
    */
   private detectUserAddedSources(): Set<string> {
     const userAddedSources = new Set<string>();
@@ -347,6 +360,13 @@ export class LayerControl implements IControl {
 
     // Check each source
     for (const [sourceId, source] of Object.entries(style.sources)) {
+      // If we have a snapshot of initial sources, use that as the primary check
+      // Sources that existed when the control was added are basemap sources
+      if (this.initialSourceIds && this.initialSourceIds.has(sourceId)) {
+        // This source was present in the initial style, it's a basemap source
+        continue;
+      }
+
       const src = source as any;
       const sourceType = src.type;
 
@@ -356,7 +376,7 @@ export class LayerControl implements IControl {
         continue;
       }
 
-      // GeoJSON sources with inline data objects are user-added
+      // GeoJSON sources with inline data objects are user-added (if added after initial load)
       if (sourceType === 'geojson') {
         if (src.data && typeof src.data === 'object') {
           userAddedSources.add(sourceId);
@@ -2376,6 +2396,30 @@ export class LayerControl implements IControl {
       }
     } catch (error) {
       console.warn('Failed to check for new layers:', error);
+    }
+  }
+
+  /**
+   * Register a custom layer adapter dynamically.
+   * This allows adding adapters after the LayerControl has been initialized.
+   * @param adapter The custom layer adapter to register
+   */
+  registerCustomAdapter(adapter: CustomLayerAdapter): void {
+    // Create registry if it doesn't exist
+    if (!this.customLayerRegistry) {
+      this.customLayerRegistry = new CustomLayerRegistry();
+      // Subscribe to registry changes
+      this.customLayerUnsubscribe = this.customLayerRegistry.onChange(() => {
+        this.checkForNewLayers();
+      });
+    }
+
+    // Register the adapter
+    this.customLayerRegistry.register(adapter);
+
+    // Rebuild layer items to include the new adapter's layers
+    if (this.panel) {
+      this.checkForNewLayers();
     }
   }
 }
