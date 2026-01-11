@@ -29,8 +29,23 @@ describe('getOpacityProperty', () => {
     expect(result).toContain('text-opacity');
   });
 
-  it('generates property name for unknown layer types', () => {
+  it('returns correct property for heatmap layers', () => {
     expect(getOpacityProperty('heatmap')).toBe('heatmap-opacity');
+  });
+
+  it('returns correct property for fill-extrusion layers', () => {
+    expect(getOpacityProperty('fill-extrusion')).toBe('fill-extrusion-opacity');
+  });
+
+  it('returns exaggeration for hillshade layers', () => {
+    expect(getOpacityProperty('hillshade')).toBe('hillshade-exaggeration');
+  });
+
+  it('returns null for color-relief layers', () => {
+    expect(getOpacityProperty('color-relief')).toBe(null);
+  });
+
+  it('generates property name for unknown layer types', () => {
     expect(getOpacityProperty('custom')).toBe('custom-opacity');
   });
 });
@@ -42,12 +57,14 @@ describe('isStyleableLayerType', () => {
     expect(isStyleableLayerType('circle')).toBe(true);
     expect(isStyleableLayerType('symbol')).toBe(true);
     expect(isStyleableLayerType('raster')).toBe(true);
+    expect(isStyleableLayerType('heatmap')).toBe(true);
+    expect(isStyleableLayerType('fill-extrusion')).toBe(true);
+    expect(isStyleableLayerType('hillshade')).toBe(true);
   });
 
   it('returns false for non-styleable layer types', () => {
     expect(isStyleableLayerType('background')).toBe(false);
-    expect(isStyleableLayerType('heatmap')).toBe(false);
-    expect(isStyleableLayerType('hillshade')).toBe(false);
+    expect(isStyleableLayerType('color-relief')).toBe(false);
     expect(isStyleableLayerType('custom')).toBe(false);
   });
 });
