@@ -3,10 +3,12 @@ import type { StyleableLayerType } from '../core/types';
 
 /**
  * Get the opacity property name for a given layer type
+ * Supports all MapLibre layer types: fill, line, symbol, circle, heatmap,
+ * fill-extrusion, raster, hillshade, color-relief, background
  * @param layerType MapLibre layer type
- * @returns Opacity property name(s)
+ * @returns Opacity property name(s), or null if the layer type doesn't support opacity
  */
-export function getOpacityProperty(layerType: string): string | string[] {
+export function getOpacityProperty(layerType: string): string | string[] | null {
   switch (layerType) {
     case 'fill':
       return 'fill-opacity';
@@ -21,7 +23,18 @@ export function getOpacityProperty(layerType: string): string | string[] {
       return 'raster-opacity';
     case 'background':
       return 'background-opacity';
+    case 'heatmap':
+      return 'heatmap-opacity';
+    case 'fill-extrusion':
+      return 'fill-extrusion-opacity';
+    case 'hillshade':
+      // Hillshade uses exaggeration for intensity, not opacity
+      return 'hillshade-exaggeration';
+    case 'color-relief':
+      // Color-relief doesn't have a standard opacity property
+      return null;
     default:
+      // For custom layer types, try the standard pattern
       return `${layerType}-opacity`;
   }
 }
@@ -31,7 +44,7 @@ export function getOpacityProperty(layerType: string): string | string[] {
  * @param map MapLibre map instance
  * @param layerId Layer ID
  * @param layerType Layer type
- * @returns Current opacity value (0-1)
+ * @returns Current opacity value (0-1), or 1.0 if the layer type doesn't support opacity
  */
 export function getLayerOpacity(
   map: MapLibreMap,
@@ -39,6 +52,11 @@ export function getLayerOpacity(
   layerType: string
 ): number {
   const opacityProp = getOpacityProperty(layerType);
+
+  // Layer type doesn't support opacity
+  if (opacityProp === null) {
+    return 1.0;
+  }
 
   if (Array.isArray(opacityProp)) {
     // For symbol layers, use icon-opacity as the primary value
@@ -65,6 +83,11 @@ export function setLayerOpacity(
 ): void {
   const opacityProp = getOpacityProperty(layerType);
 
+  // Layer type doesn't support opacity
+  if (opacityProp === null) {
+    return;
+  }
+
   if (Array.isArray(opacityProp)) {
     // For symbol layers, set both icon and text opacity
     opacityProp.forEach((prop) => {
@@ -81,7 +104,16 @@ export function setLayerOpacity(
  * @returns True if the layer type supports style editing
  */
 export function isStyleableLayerType(layerType: string): layerType is StyleableLayerType {
-  return ['fill', 'line', 'circle', 'symbol', 'raster'].includes(layerType);
+  return [
+    'fill',
+    'line',
+    'circle',
+    'symbol',
+    'raster',
+    'heatmap',
+    'fill-extrusion',
+    'hillshade',
+  ].includes(layerType);
 }
 
 /**

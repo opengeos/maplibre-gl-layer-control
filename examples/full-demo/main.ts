@@ -6,7 +6,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 // Create the map
 const map = new maplibregl.Map({
   container: 'map',
-  style: 'https://demotiles.maplibre.org/style.json',
+  style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
   center: [0, 0], // New York area
   zoom: 2
 });
@@ -133,11 +133,11 @@ map.on('load', () => {
     }
   }, 'countries-layer'); // Insert below countries layer
 
-  // Create the layer control with auto-detection
+  // Create the layer control AFTER adding custom layers
+  // The control will automatically detect basemap layers by fetching the original style
   const layerControl = new LayerControl({
     collapsed: false, // Start expanded to show features
-    // layers: ['countries-layer', 'countries-outline', 'country-points', 'raster-layer'],
-    panelWidth: 370,
+    panelWidth: 360,
     panelMinWidth: 240,
     panelMaxWidth: 450,
     panelMaxHeight: 400,

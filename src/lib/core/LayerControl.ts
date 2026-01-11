@@ -90,7 +90,7 @@ export class LayerControl implements IControl {
   onAdd(map: MapLibreMap): HTMLElement {
     this.map = map;
 
-    // Auto-detect layers if layerStates not provided
+    // Auto-detect layers using source-based heuristics
     if (Object.keys(this.state.layerStates).length === 0) {
       this.autoDetectLayers();
     }
@@ -146,11 +146,13 @@ export class LayerControl implements IControl {
 
     if (this.targetLayers.length === 0) {
       // No layers specified - auto-detect user-added layers vs background layers
-      // Get the original style's source IDs to determine which layers are from the base style
-      const originalSourceIds = this.getOriginalStyleSourceIds();
+      // Use source-based heuristics to determine which layers are user-added
 
       const userAddedLayers: string[] = [];
       const backgroundLayerIds: string[] = [];
+
+      // First, identify which sources are user-added
+      const userAddedSourceIds = this.detectUserAddedSources();
 
       allLayerIds.forEach(layerId => {
         const layer = this.map.getLayer(layerId);
@@ -162,15 +164,13 @@ export class LayerControl implements IControl {
           return;
         }
 
-        // Check if this layer uses a source from the original style
+        // Check if this layer uses a user-added source
         const sourceId = (layer as any).source;
-
-        // Layers without a source (like background color layer) are background layers
-        // Layers using sources NOT in the original style are user-added
-        if (!sourceId || originalSourceIds.has(sourceId)) {
-          backgroundLayerIds.push(layerId);
-        } else {
+        if (sourceId && userAddedSourceIds.has(sourceId)) {
           userAddedLayers.push(layerId);
+        } else {
+          // Layer uses a basemap source or has no source (like background color layer)
+          backgroundLayerIds.push(layerId);
         }
       });
 
@@ -271,75 +271,113 @@ export class LayerControl implements IControl {
   }
 
   /**
-   * Get the source IDs that were part of the original style (from the style URL)
-   * Sources added via map.addSource() are considered user-added
+   * Detect which sources are user-added (not from the basemap style)
+   * User-added sources are identified by:
+   * - GeoJSON sources with inline data objects (not URL strings)
+   * - Image, video, canvas sources (always user-added)
+   * - Raster, raster-dem, vector sources from non-basemap tile providers
    */
-  private getOriginalStyleSourceIds(): Set<string> {
-    const originalSourceIds = new Set<string>();
+  private detectUserAddedSources(): Set<string> {
+    const userAddedSources = new Set<string>();
     const style = this.map.getStyle();
-    if (!style || !style.sources) return originalSourceIds;
+    if (!style || !style.sources) return userAddedSources;
 
-    // Try to determine the style's base URL from sprite or glyphs
+    // First, detect the basemap's domain from sprite/glyphs URLs
+    const basemapDomains = new Set<string>();
+
+    // Known basemap providers
+    const knownBasemapProviders = [
+      'demotiles.maplibre.org',
+      'api.maptiler.com',
+      'tiles.stadiamaps.com',
+      'api.mapbox.com',
+      'basemaps.cartocdn.com',
+      'tiles.mapbox.com',
+      'a.basemaps.cartocdn.com',
+      'b.basemaps.cartocdn.com',
+      'c.basemaps.cartocdn.com',
+      'd.basemaps.cartocdn.com',
+      'tiles.arcgis.com',
+      'server.arcgisonline.com',
+      'services.arcgisonline.com',
+    ];
+
+    // Detect domains from sprite/glyphs URLs (these are likely basemap domains)
     const spriteUrl = style.sprite as string | undefined;
-    const glyphsUrl = style.glyphs;
+    if (spriteUrl && typeof spriteUrl === 'string') {
+      try {
+        const url = new URL(spriteUrl);
+        basemapDomains.add(url.hostname);
+      } catch { /* ignore */ }
+    }
+    if (style.glyphs) {
+      try {
+        const url = new URL(style.glyphs.replace('{fontstack}', 'x').replace('{range}', 'x'));
+        basemapDomains.add(url.hostname);
+      } catch { /* ignore */ }
+    }
 
-    let styleBaseDomain = '';
-    if (spriteUrl) {
-      try {
-        const url = new URL(typeof spriteUrl === 'string' ? spriteUrl : '');
-        styleBaseDomain = url.hostname;
-      } catch {
-        // Ignore URL parsing errors
+    // Check each source
+    for (const [sourceId, source] of Object.entries(style.sources)) {
+      const src = source as any;
+      const sourceType = src.type;
+
+      // Image, video, and canvas sources are always user-added
+      if (sourceType === 'image' || sourceType === 'video' || sourceType === 'canvas') {
+        userAddedSources.add(sourceId);
+        continue;
       }
-    } else if (glyphsUrl) {
-      try {
-        const url = new URL(glyphsUrl.replace('{fontstack}', 'test').replace('{range}', 'test'));
-        styleBaseDomain = url.hostname;
-      } catch {
-        // Ignore URL parsing errors
+
+      // GeoJSON sources with inline data objects are user-added
+      if (sourceType === 'geojson') {
+        if (src.data && typeof src.data === 'object') {
+          userAddedSources.add(sourceId);
+        } else if (src.data && typeof src.data === 'string') {
+          // GeoJSON with URL - check if it's from a basemap domain
+          try {
+            const url = new URL(src.data);
+            const isBasemap = knownBasemapProviders.some(p => url.hostname.includes(p)) ||
+                              basemapDomains.has(url.hostname);
+            if (!isBasemap) {
+              userAddedSources.add(sourceId);
+            }
+          } catch {
+            // Relative URL or invalid - assume user-added
+            userAddedSources.add(sourceId);
+          }
+        }
+        continue;
+      }
+
+      // Check tile URLs for raster, raster-dem, and vector sources
+      if (sourceType === 'raster' || sourceType === 'raster-dem' || sourceType === 'vector') {
+        const tileUrl = src.url || (src.tiles && src.tiles[0]) || '';
+        if (tileUrl) {
+          try {
+            const url = new URL(tileUrl.replace(/{[^}]+}/g, '0'));
+            const hostname = url.hostname;
+
+            // Check if this is a known basemap provider
+            const isKnownBasemap = knownBasemapProviders.some(provider =>
+              hostname === provider || hostname.endsWith('.' + provider)
+            );
+
+            // Check if this matches detected basemap domains
+            const matchesBasemapDomain = basemapDomains.has(hostname);
+
+            // If not a basemap source, it's user-added
+            if (!isKnownBasemap && !matchesBasemapDomain) {
+              userAddedSources.add(sourceId);
+            }
+          } catch {
+            // If URL parsing fails, assume it could be user-added
+            userAddedSources.add(sourceId);
+          }
+        }
       }
     }
 
-    // Check each source to determine if it's from the original style
-    Object.entries(style.sources).forEach(([sourceId, source]) => {
-      const src = source as any;
-
-      // Check if this source matches the style's base domain
-      let sourceUrl = src.url || (src.tiles && src.tiles[0]) || '';
-
-      if (sourceUrl) {
-        try {
-          const url = new URL(sourceUrl);
-          // If source is from the same domain as the style, it's original
-          if (styleBaseDomain && url.hostname === styleBaseDomain) {
-            originalSourceIds.add(sourceId);
-            return;
-          }
-          // Common tile providers that are typically part of base styles
-          const basemapDomains = [
-            'demotiles.maplibre.org',
-            'api.maptiler.com',
-            'tiles.stadiamaps.com',
-            'api.mapbox.com',
-            'basemaps.cartocdn.com'
-          ];
-          if (basemapDomains.some(domain => url.hostname.includes(domain))) {
-            originalSourceIds.add(sourceId);
-            return;
-          }
-        } catch {
-          // If URL parsing fails, check other heuristics
-        }
-      }
-
-      // Sources without URL and without data are likely from original style
-      // (e.g., composite sources, or sources defined inline in the style)
-      if (!src.data && !sourceUrl && src.type !== 'geojson') {
-        originalSourceIds.add(sourceId);
-      }
-    });
-
-    return originalSourceIds;
+    return userAddedSources;
   }
 
   /**
@@ -2093,7 +2131,6 @@ export class LayerControl implements IControl {
       }
 
       const currentMapLayerIds = new Set(style.layers.map(layer => layer.id));
-      const originalSourceIds = this.getOriginalStyleSourceIds();
 
       // Check if we're in auto-detect mode (no specific layers were specified)
       const isAutoDetectMode = this.targetLayers.length === 0 ||
@@ -2102,20 +2139,22 @@ export class LayerControl implements IControl {
 
       // Find new layers that aren't in our state yet
       const newLayers: string[] = [];
+      const userAddedSourceIds = isAutoDetectMode ? this.detectUserAddedSources() : new Set<string>();
+
       currentMapLayerIds.forEach(layerId => {
         if (layerId !== 'Background' && !this.state.layerStates[layerId]) {
           const layer = this.map.getLayer(layerId);
           if (layer) {
-            // In auto-detect mode, only add layers using user-added sources
+            // In auto-detect mode, only add layers that use user-added sources
             if (isAutoDetectMode) {
               // Skip drawn layers if excludeDrawnLayers is enabled
               if (this.excludeDrawnLayers && this.isDrawnLayer(layerId)) {
                 return;
               }
 
+              // Only add layers that use user-added sources
               const sourceId = (layer as any).source;
-              // If no source or source is from original style, skip (it's a background layer)
-              if (!sourceId || originalSourceIds.has(sourceId)) {
+              if (!sourceId || !userAddedSourceIds.has(sourceId)) {
                 return;
               }
             }

@@ -14,7 +14,7 @@ export default function App() {
     // Create map
     const newMap = new maplibregl.Map({
       container: mapContainer.current,
-      style: 'https://demotiles.maplibre.org/style.json',
+      style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
       center: [-74.5, 40],
       zoom: 9,
     });
@@ -141,7 +141,7 @@ export default function App() {
           position="top-right"
           collapsed={false}
           layers={['countries-layer', 'countries-outline', 'country-points']}
-          panelWidth={340}
+          panelWidth={360}
           panelMinWidth={240}
           panelMaxWidth={450}
         />
