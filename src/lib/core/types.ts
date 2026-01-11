@@ -97,8 +97,18 @@ export interface LayerControlOptions {
 
 /**
  * MapLibre layer types that support styling
+ * Includes all standard MapLibre layer types
  */
-export type StyleableLayerType = 'fill' | 'line' | 'circle' | 'symbol' | 'raster';
+export type StyleableLayerType =
+  | 'fill'
+  | 'line'
+  | 'circle'
+  | 'symbol'
+  | 'raster'
+  | 'heatmap'
+  | 'fill-extrusion'
+  | 'hillshade'
+  | 'background';
 
 /**
  * Paint properties for different layer types
