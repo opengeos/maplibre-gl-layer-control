@@ -23,9 +23,14 @@ import {
  */
 export class LayerControl implements IControl {
   private map!: MapLibreMap;
+  private mapContainer!: HTMLElement;
   private container!: HTMLDivElement;
   private button!: HTMLButtonElement;
   private panel!: HTMLDivElement;
+
+  // Panel positioning
+  private resizeHandler: (() => void) | null = null;
+  private mapResizeHandler: (() => void) | null = null;
 
   // State management
   private state: InternalControlState;
@@ -89,6 +94,7 @@ export class LayerControl implements IControl {
    */
   onAdd(map: MapLibreMap): HTMLElement {
     this.map = map;
+    this.mapContainer = map.getContainer();
 
     // Auto-detect layers using source-based heuristics
     if (Object.keys(this.state.layerStates).length === 0) {
@@ -100,7 +106,8 @@ export class LayerControl implements IControl {
     this.panel = this.createPanel();
 
     this.container.appendChild(this.button);
-    this.container.appendChild(this.panel);
+    // Append panel to map container for independent positioning (avoids overlap with other controls)
+    this.mapContainer.appendChild(this.panel);
 
     // Now that panel is attached, update width display
     this.updateWidthDisplay();
@@ -110,6 +117,14 @@ export class LayerControl implements IControl {
 
     // Build layer items
     this.buildLayerItems();
+
+    // If panel starts expanded, update position after control is added to DOM
+    if (!this.state.collapsed) {
+      // Use requestAnimationFrame to wait until container is in DOM and positioned
+      requestAnimationFrame(() => {
+        this.updatePanelPosition();
+      });
+    }
 
     return this.container;
   }
@@ -128,8 +143,21 @@ export class LayerControl implements IControl {
       this.customLayerRegistry = null;
     }
 
+    // Remove resize event listeners
+    if (this.resizeHandler) {
+      window.removeEventListener('resize', this.resizeHandler);
+      this.resizeHandler = null;
+    }
+    if (this.mapResizeHandler) {
+      this.map.off('resize', this.mapResizeHandler);
+      this.mapResizeHandler = null;
+    }
+
+    // Remove panel from map container
+    this.panel.parentNode?.removeChild(this.panel);
+
+    // Remove button container from control stack
     this.container.parentNode?.removeChild(this.container);
-    // Cleanup will be handled by garbage collection
   }
 
   /**
@@ -474,6 +502,74 @@ export class LayerControl implements IControl {
   }
 
   /**
+   * Detect which corner the control is positioned in
+   * @returns The position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+   */
+  private getControlPosition(): 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' {
+    const parent = this.container.parentElement;
+    if (!parent) return 'top-right'; // Default
+
+    if (parent.classList.contains('maplibregl-ctrl-top-left')) return 'top-left';
+    if (parent.classList.contains('maplibregl-ctrl-top-right')) return 'top-right';
+    if (parent.classList.contains('maplibregl-ctrl-bottom-left')) return 'bottom-left';
+    if (parent.classList.contains('maplibregl-ctrl-bottom-right')) return 'bottom-right';
+
+    return 'top-right'; // Default
+  }
+
+  /**
+   * Update the panel position based on button location and control corner
+   * Positions the panel next to the button, expanding in the appropriate direction
+   */
+  private updatePanelPosition(): void {
+    if (!this.button || !this.panel || !this.mapContainer) return;
+
+    const buttonRect = this.button.getBoundingClientRect();
+    const mapRect = this.mapContainer.getBoundingClientRect();
+    const position = this.getControlPosition();
+
+    // Calculate button position relative to map container
+    const buttonTop = buttonRect.top - mapRect.top;
+    const buttonBottom = mapRect.bottom - buttonRect.bottom;
+    const buttonLeft = buttonRect.left - mapRect.left;
+    const buttonRight = mapRect.right - buttonRect.right;
+
+    const panelGap = 5; // Gap between button and panel
+
+    // Reset all positioning
+    this.panel.style.top = '';
+    this.panel.style.bottom = '';
+    this.panel.style.left = '';
+    this.panel.style.right = '';
+
+    switch (position) {
+      case 'top-left':
+        // Panel expands down and to the right
+        this.panel.style.top = `${buttonTop + buttonRect.height + panelGap}px`;
+        this.panel.style.left = `${buttonLeft}px`;
+        break;
+
+      case 'top-right':
+        // Panel expands down and to the left
+        this.panel.style.top = `${buttonTop + buttonRect.height + panelGap}px`;
+        this.panel.style.right = `${buttonRight}px`;
+        break;
+
+      case 'bottom-left':
+        // Panel expands up and to the right
+        this.panel.style.bottom = `${buttonBottom + buttonRect.height + panelGap}px`;
+        this.panel.style.left = `${buttonLeft}px`;
+        break;
+
+      case 'bottom-right':
+        // Panel expands up and to the left
+        this.panel.style.bottom = `${buttonBottom + buttonRect.height + panelGap}px`;
+        this.panel.style.right = `${buttonRight}px`;
+        break;
+    }
+  }
+
+  /**
    * Create action buttons for Show All / Hide All
    */
   private createActionButtons(): HTMLElement {
@@ -750,12 +846,29 @@ export class LayerControl implements IControl {
     // Toggle button click
     this.button.addEventListener('click', () => this.toggle());
 
-    // Click outside to close
+    // Click outside to close (check both container and panel since they're now separate)
     document.addEventListener('click', (e) => {
-      if (!this.container.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (!this.container.contains(target) && !this.panel.contains(target)) {
         this.collapse();
       }
     });
+
+    // Update panel position on window resize
+    this.resizeHandler = () => {
+      if (!this.state.collapsed) {
+        this.updatePanelPosition();
+      }
+    };
+    window.addEventListener('resize', this.resizeHandler);
+
+    // Update panel position on map resize (e.g., sidebar toggle)
+    this.mapResizeHandler = () => {
+      if (!this.state.collapsed) {
+        this.updatePanelPosition();
+      }
+    };
+    this.map.on('resize', this.mapResizeHandler);
 
     // Listen for map layer changes
     this.setupLayerChangeListeners();
@@ -814,6 +927,7 @@ export class LayerControl implements IControl {
   private expand(): void {
     this.state.collapsed = false;
     this.panel.classList.add('expanded');
+    this.updatePanelPosition();
   }
 
   /**

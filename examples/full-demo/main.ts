@@ -148,5 +148,8 @@ map.on('load', () => {
   // Add the control to the map
   map.addControl(layerControl, 'top-right');
 
+  //Add Globe control to top-right
+  map.addControl(new maplibregl.GlobeControl(), 'top-right');
+
   console.log('Full demo loaded with layer control');
 });
