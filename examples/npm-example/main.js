@@ -5,10 +5,13 @@ import { LayerControl } from 'maplibre-gl-layer-control';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import 'maplibre-gl-layer-control/style.css';
 
+// Define the basemap style URL as a constant for reuse
+const BASEMAP_STYLE_URL = 'https://demotiles.maplibre.org/style.json';
+
 // Create the map
 const map = new maplibregl.Map({
   container: 'map',
-  style: 'https://demotiles.maplibre.org/style.json',
+  style: BASEMAP_STYLE_URL,
   center: [-74.5, 40],
   zoom: 9
 });
@@ -87,12 +90,20 @@ map.on('load', () => {
   const layerControl = new LayerControl({
     collapsed: false,
     layers: ['regions-fill', 'regions-outline', 'regions-points'],
-    panelWidth: 320,
+    panelWidth: 360,
     panelMinWidth: 240,
     panelMaxWidth: 450
   });
 
-  // Option 2: Auto-detect all layers (uncomment to try)
+  // Option 2: Auto-detect layers with basemapStyleUrl for reliable detection
+  // By providing basemapStyleUrl, all layers from the basemap are grouped under "Background"
+  // and user-added layers are shown individually in the control
+  // const layerControl = new LayerControl({
+  //   collapsed: false,
+  //   basemapStyleUrl: BASEMAP_STYLE_URL
+  // });
+
+  // Option 3: Auto-detect all layers without basemapStyleUrl (uses heuristic detection)
   // const layerControl = new LayerControl({
   //   collapsed: false
   // });
