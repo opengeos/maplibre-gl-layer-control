@@ -73,7 +73,17 @@ map.on('load', () => {
     panelMaxWidth: 450
   });
 
-  // Option 2: Show ALL layers individually (no layers parameter)
+  // Option 2: Auto-detect with basemapStyleUrl (recommended for reliable basemap detection)
+  // - Fetches the basemap style to identify basemap layers
+  // - All basemap layers are grouped under "Background"
+  // - User-added layers are shown individually
+  // const BASEMAP_STYLE = 'https://demotiles.maplibre.org/style.json';
+  // const layerControl = new LayerControl({
+  //   collapsed: false,
+  //   basemapStyleUrl: BASEMAP_STYLE
+  // });
+
+  // Option 3: Show ALL layers individually (no layers parameter)
   // - Auto-detects ALL layers from the map
   // - Generates friendly names from layer IDs (e.g., 'countries-layer' → 'Countries Layer')
   // const layerControl = new LayerControl({
@@ -83,7 +93,7 @@ map.on('load', () => {
   //   panelMaxWidth: 450
   // });
 
-  // Option 3: Manually specify layer states (for full control over names)
+  // Option 4: Manually specify layer states (for full control over names)
   // const layerControl = new LayerControl({
   //   collapsed: false,
   //   layerStates: {
@@ -238,10 +248,11 @@ map.on('load', () => {
 See the [examples](./examples) folder for complete working examples:
 
 - **[basic](./examples/basic)** - Simple vanilla JavaScript example
-- **[full-demo](./examples/full-demo)** - Full demo with multiple layer types
+- **[full-demo](./examples/full-demo)** - Full demo with multiple layer types and `basemapStyleUrl` for reliable basemap detection
 - **[dynamic-layers](./examples/dynamic-layers)** - Auto-detect layers added before or after control
 - **[background-legend](./examples/background-legend)** - Background layer visibility control
 - **[react](./examples/react)** - React integration example
+- **[cdn](./examples/cdn)** - Browser-only example using CDN (no build step required)
 
 ### Layer Symbols
 
