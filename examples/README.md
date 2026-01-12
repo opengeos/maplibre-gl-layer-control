@@ -16,6 +16,7 @@ npm install maplibre-gl-layer-control maplibre-gl
 | [cdn](./cdn) | Browser-only example using CDN (no build step required) |
 | [basic](./basic) | Simple development example |
 | [full-demo](./full-demo) | Comprehensive demo with multiple layer types |
+| [dynamic-layers](./dynamic-layers) | Auto-detect layers added before or after control |
 | [background-legend](./background-legend) | Control individual background layer visibility |
 | [react](./react) | React integration example |
 

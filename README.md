@@ -214,12 +214,32 @@ When `basemapStyleUrl` is provided:
 - All other layers (user-added) are shown individually in the control
 - New layers added later are automatically detected as user layers
 
+### Automatic Detection Without basemapStyleUrl
+
+Even without `basemapStyleUrl`, the control uses source-based heuristics to detect user-added layers. Custom MapLibre layers (using `map.addLayer()`) are automatically detected whether they are added **before** or **after** the layer control - no custom adapter is needed for standard MapLibre layer types!
+
+```typescript
+map.on('load', () => {
+  // Add custom layers BEFORE the control - they will be detected
+  map.addSource('my-source', { type: 'geojson', data: myGeoJson });
+  map.addLayer({ id: 'my-layer', type: 'fill', source: 'my-source', ... });
+
+  // Add the control - it detects existing custom layers
+  const layerControl = new LayerControl({ collapsed: false });
+  map.addControl(layerControl, 'top-right');
+
+  // Add more layers AFTER the control - they will also be detected automatically
+  map.addLayer({ id: 'another-layer', type: 'circle', source: 'another-source', ... });
+});
+```
+
 ## Examples
 
 See the [examples](./examples) folder for complete working examples:
 
 - **[basic](./examples/basic)** - Simple vanilla JavaScript example
 - **[full-demo](./examples/full-demo)** - Full demo with multiple layer types
+- **[dynamic-layers](./examples/dynamic-layers)** - Auto-detect layers added before or after control
 - **[background-legend](./examples/background-legend)** - Background layer visibility control
 - **[react](./examples/react)** - React integration example
 

@@ -38,6 +38,7 @@ export class LayerControl implements IControl {
   private targetLayers: string[];
   private styleEditors: Map<string, HTMLElement>;
   private initialSourceIds: Set<string> | null = null;
+  private initialLayerIds: Set<string> | null = null;
 
   // Panel width management
   private minPanelWidth: number;
@@ -103,13 +104,20 @@ export class LayerControl implements IControl {
     this.map = map;
     this.mapContainer = map.getContainer();
 
-    // Capture initial source IDs (basemap sources) before auto-detecting layers
-    // Sources added after this point are considered user-added
+    // Capture initial source IDs and layer IDs (basemap) before auto-detecting layers
+    // Sources and layers added after this point are considered user-added
     const style = this.map.getStyle();
     if (style && style.sources) {
       this.initialSourceIds = new Set(Object.keys(style.sources));
     } else {
       this.initialSourceIds = new Set();
+    }
+
+    // Capture initial layer IDs - any layer added after this is user-added
+    if (style && style.layers) {
+      this.initialLayerIds = new Set(style.layers.map(layer => layer.id));
+    } else {
+      this.initialLayerIds = new Set();
     }
 
     this.container = this.createContainer();
@@ -239,12 +247,17 @@ export class LayerControl implements IControl {
       const userAddedLayers: string[] = [];
       const backgroundLayerIds: string[] = [];
 
-      // If basemapLayerIds is available (from fetched style URL), use it for reliable detection
-      // Otherwise fall back to source-based heuristics
+      // Detection priority for INITIAL detection:
+      // 1. basemapLayerIds (from basemapStyleUrl) - most reliable
+      // 2. Source-based heuristics - works for layers added before OR after control
+      // Note: initialLayerIds is NOT used here because it would incorrectly classify
+      // user layers added BEFORE the control as basemap layers
       const useBasemapStyleDetection = this.basemapLayerIds !== null && this.basemapLayerIds.size > 0;
 
-      // First, identify which sources are user-added (only needed for heuristic detection)
-      const userAddedSourceIds = useBasemapStyleDetection ? new Set<string>() : this.detectUserAddedSources();
+      // Identify which sources are user-added (for source-based heuristic detection)
+      const userAddedSourceIds = useBasemapStyleDetection
+        ? new Set<string>()
+        : this.detectUserAddedSources();
 
       allLayerIds.forEach(layerId => {
         const layer = this.map.getLayer(layerId);
@@ -266,7 +279,7 @@ export class LayerControl implements IControl {
             userAddedLayers.push(layerId);
           }
         } else {
-          // Fall back to source-based heuristics
+          // Use source-based heuristics
           // Check if this layer uses a user-added source
           const sourceId = (layer as any).source;
           if (sourceId && userAddedSourceIds.has(sourceId)) {
@@ -1252,6 +1265,7 @@ export class LayerControl implements IControl {
 
   /**
    * Check if a layer is a user-added layer (vs basemap layer)
+   * Used primarily for the background legend to determine which layers are background
    */
   private isUserAddedLayer(layerId: string): boolean {
     // If this layer is in our state (and not Background), it's user-added
@@ -1259,9 +1273,26 @@ export class LayerControl implements IControl {
       return true;
     }
 
-    // If we have basemapLayerIds, check if the layer is NOT in the basemap
+    // If we have basemapLayerIds (from basemapStyleUrl), check if the layer is NOT in the basemap
     if (this.basemapLayerIds !== null && this.basemapLayerIds.size > 0) {
       return !this.basemapLayerIds.has(layerId);
+    }
+
+    // For layers not in our state, check if the layer was added after control initialization
+    // or uses a user-added source
+    if (this.initialLayerIds !== null && !this.initialLayerIds.has(layerId)) {
+      // Layer was added after control - it's user-added
+      return true;
+    }
+
+    // Check source-based heuristics
+    const layer = this.map.getLayer(layerId);
+    if (layer) {
+      const sourceId = (layer as any).source;
+      if (sourceId) {
+        const userAddedSourceIds = this.detectUserAddedSources();
+        return userAddedSourceIds.has(sourceId);
+      }
     }
 
     return false;
@@ -2349,11 +2380,12 @@ export class LayerControl implements IControl {
       // Find new layers that aren't in our state yet
       const newLayers: string[] = [];
 
-      // Use basemap style detection if available, otherwise fall back to source-based heuristics
+      // Detection priority for NEW layers (added after control):
+      // 1. basemapLayerIds (from basemapStyleUrl) - most reliable
+      // 2. initialLayerIds - layer NOT in initialLayerIds means it was added after control
+      // 3. Source-based heuristics - fallback
       const useBasemapStyleDetection = this.basemapLayerIds !== null && this.basemapLayerIds.size > 0;
-      const userAddedSourceIds = (isAutoDetectMode && !useBasemapStyleDetection)
-        ? this.detectUserAddedSources()
-        : new Set<string>();
+      const useInitialLayerDetection = !useBasemapStyleDetection && this.initialLayerIds !== null && this.initialLayerIds.size > 0;
 
       currentMapLayerIds.forEach(layerId => {
         if (layerId !== 'Background' && !this.state.layerStates[layerId]) {
@@ -2371,9 +2403,21 @@ export class LayerControl implements IControl {
                 if (this.basemapLayerIds!.has(layerId)) {
                   return;
                 }
+              } else if (useInitialLayerDetection) {
+                // Layer NOT in initialLayerIds means it was added AFTER control
+                // These are definitely user-added layers and should be included
+                if (this.initialLayerIds!.has(layerId)) {
+                  // Layer was in initial set - check source-based heuristics
+                  const userAddedSourceIds = this.detectUserAddedSources();
+                  const sourceId = (layer as any).source;
+                  if (!sourceId || !userAddedSourceIds.has(sourceId)) {
+                    return;
+                  }
+                }
+                // Layer NOT in initialLayerIds - it's new, include it
               } else {
                 // Fall back to source-based heuristics
-                // Only add layers that use user-added sources
+                const userAddedSourceIds = this.detectUserAddedSources();
                 const sourceId = (layer as any).source;
                 if (!sourceId || !userAddedSourceIds.has(sourceId)) {
                   return;
