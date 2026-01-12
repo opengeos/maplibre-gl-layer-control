@@ -91,6 +91,8 @@ export interface LayerControlOptions {
   panelMaxHeight?: number;
   /** Whether to exclude drawn layers from drawing libraries like Geoman, Mapbox GL Draw, etc. (default: true) */
   excludeDrawnLayers?: boolean;
+  /** Array of wildcard patterns to exclude layers by name (e.g., ['*-temp-*', 'debug-*']) */
+  excludeLayers?: string[];
   /** Custom layer adapters for non-MapLibre layers (e.g., deck.gl COG layers, Zarr layers) */
   customLayerAdapters?: CustomLayerAdapter[];
   /**
