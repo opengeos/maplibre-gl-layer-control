@@ -7,7 +7,7 @@ import type { CustomLayerAdapter, LayerState } from './types';
 export class CustomLayerRegistry {
   private adapters: Map<string, CustomLayerAdapter> = new Map();
   private changeListeners: Array<(event: 'add' | 'remove', layerId: string) => void> = [];
-  private unsubscribers: Array<() => void> = [];
+  private unsubscribers: Map<string, () => void> = new Map();
 
   /**
    * Register a custom layer adapter.
@@ -21,7 +21,7 @@ export class CustomLayerRegistry {
       const unsubscribe = adapter.onLayerChange((event, layerId) => {
         this.notifyChange(event, layerId);
       });
-      this.unsubscribers.push(unsubscribe);
+      this.unsubscribers.set(adapter.type, unsubscribe);
     }
   }
 
@@ -30,6 +30,12 @@ export class CustomLayerRegistry {
    * @param type The adapter type to unregister
    */
   unregister(type: string): void {
+    // Clean up the subscription for this adapter
+    const unsubscribe = this.unsubscribers.get(type);
+    if (unsubscribe) {
+      unsubscribe();
+      this.unsubscribers.delete(type);
+    }
     this.adapters.delete(type);
   }
 
@@ -150,7 +156,7 @@ export class CustomLayerRegistry {
    */
   destroy(): void {
     this.unsubscribers.forEach(unsub => unsub());
-    this.unsubscribers = [];
+    this.unsubscribers.clear();
     this.adapters.clear();
     this.changeListeners = [];
   }
