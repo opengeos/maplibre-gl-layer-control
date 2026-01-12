@@ -386,6 +386,41 @@ npm test
 npm run build
 ```
 
+## Docker
+
+The examples can be run using Docker. The image is automatically built and published to GitHub Container Registry.
+
+### Pull and Run
+
+```bash
+# Pull the latest image
+docker pull ghcr.io/opengeos/maplibre-gl-layer-control:latest
+
+# Run the container
+docker run -p 8080:80 ghcr.io/opengeos/maplibre-gl-layer-control:latest
+```
+
+Then open http://localhost:8080/maplibre-gl-layer-control/ in your browser to view the examples.
+
+### Build Locally
+
+```bash
+# Build the image
+docker build -t maplibre-gl-layer-control .
+
+# Run the container
+docker run -p 8080:80 maplibre-gl-layer-control
+```
+
+### Available Tags
+
+| Tag | Description |
+|-----|-------------|
+| `latest` | Latest release |
+| `x.y.z` | Specific version (e.g., `1.0.0`) |
+| `x.y` | Minor version (e.g., `1.0`) |
+
+
 ## License
 
 MIT © Qiusheng Wu
