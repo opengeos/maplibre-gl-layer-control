@@ -48,6 +48,7 @@ export class LayerControl implements IControl {
   private showOpacitySlider: boolean;
   private showLayerSymbol: boolean;
   private excludeDrawnLayers: boolean;
+  private excludeLayerPatterns: RegExp[];
   private customLayerRegistry: CustomLayerRegistry | null = null;
   private customLayerUnsubscribe: (() => void) | null = null;
   private basemapStyleUrl: string | null = null;
@@ -69,6 +70,7 @@ export class LayerControl implements IControl {
     this.showOpacitySlider = options.showOpacitySlider !== false;
     this.showLayerSymbol = options.showLayerSymbol !== false;
     this.excludeDrawnLayers = options.excludeDrawnLayers !== false;
+    this.excludeLayerPatterns = this.wildcardPatternsToRegex(options.excludeLayers || []);
 
     this.state = {
       collapsed: options.collapsed !== false,
@@ -269,6 +271,12 @@ export class LayerControl implements IControl {
           return;
         }
 
+        // Skip layers matching user-defined exclusion patterns
+        if (this.isExcludedByPattern(layerId)) {
+          backgroundLayerIds.push(layerId);
+          return;
+        }
+
         if (useBasemapStyleDetection) {
           // Use basemap style layer IDs for reliable detection
           if (this.basemapLayerIds!.has(layerId)) {
@@ -323,6 +331,12 @@ export class LayerControl implements IControl {
       const basemapLayers: string[] = [];
 
       allLayerIds.forEach(layerId => {
+        // Skip layers matching user-defined exclusion patterns
+        if (this.isExcludedByPattern(layerId)) {
+          basemapLayers.push(layerId);
+          return;
+        }
+
         if (this.targetLayers.includes(layerId)) {
           userLayers.push(layerId);
         } else {
@@ -538,6 +552,26 @@ export class LayerControl implements IControl {
     ];
 
     return drawnLayerPatterns.some(pattern => pattern.test(layerId));
+  }
+
+  /**
+   * Convert wildcard patterns (e.g., '*-temp-*', 'debug-*') to RegExp objects
+   */
+  private wildcardPatternsToRegex(patterns: string[]): RegExp[] {
+    return patterns.map(pattern => {
+      // Escape special regex characters except *
+      const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+      // Convert * to .* for wildcard matching
+      const regexStr = escaped.replace(/\*/g, '.*');
+      return new RegExp(`^${regexStr}$`, 'i');
+    });
+  }
+
+  /**
+   * Check if a layer matches any of the user-defined exclusion patterns
+   */
+  private isExcludedByPattern(layerId: string): boolean {
+    return this.excludeLayerPatterns.some(pattern => pattern.test(layerId));
   }
 
   /**
@@ -1576,6 +1610,11 @@ export class LayerControl implements IControl {
           return;
         }
 
+        // Skip layers matching user-defined exclusion patterns
+        if (this.isExcludedByPattern(layer.id)) {
+          return;
+        }
+
         // If "Only rendered" filter is enabled, skip layers that aren't rendered
         if (this.state.onlyRenderedFilter && !this.isLayerRendered(layer.id)) {
           return;
@@ -2395,6 +2434,11 @@ export class LayerControl implements IControl {
             if (isAutoDetectMode) {
               // Skip drawn layers if excludeDrawnLayers is enabled
               if (this.excludeDrawnLayers && this.isDrawnLayer(layerId)) {
+                return;
+              }
+
+              // Skip layers matching user-defined exclusion patterns
+              if (this.isExcludedByPattern(layerId)) {
                 return;
               }
 

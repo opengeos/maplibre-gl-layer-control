@@ -170,6 +170,7 @@ function MapComponent() {
 | `showOpacitySlider` | `boolean` | `true` | Show opacity slider for layers |
 | `showLayerSymbol` | `boolean` | `true` | Show layer type symbols (colored icons) next to layer names |
 | `excludeDrawnLayers` | `boolean` | `true` | Exclude layers from drawing libraries (Geoman, Mapbox GL Draw, etc.) |
+| `excludeLayers` | `string[]` | `undefined` | Array of wildcard patterns to exclude layers by name (e.g., `['*-temp-*', 'debug-*']`) |
 | `customLayerAdapters` | `CustomLayerAdapter[]` | `undefined` | Adapters for non-MapLibre layers (deck.gl, Zarr, etc.) |
 | `basemapStyleUrl` | `string` | `undefined` | URL of basemap style JSON for reliable layer detection (see below) |
 
