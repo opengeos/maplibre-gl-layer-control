@@ -161,6 +161,7 @@ function MapComponent() {
 | `showLayerSymbol` | `boolean` | `true` | Show layer type symbols (colored icons) next to layer names |
 | `excludeDrawnLayers` | `boolean` | `true` | Exclude layers from drawing libraries (Geoman, Mapbox GL Draw, etc.) |
 | `customLayerAdapters` | `CustomLayerAdapter[]` | `undefined` | Adapters for non-MapLibre layers (deck.gl, Zarr, etc.) |
+| `basemapStyleUrl` | `string` | `undefined` | URL of basemap style JSON for reliable layer detection (see below) |
 
 ### LayerState
 
@@ -171,6 +172,47 @@ interface LayerState {
   name?: string;       // Display name (auto-generated if omitted)
 }
 ```
+
+### Basemap Style URL Detection
+
+When using auto-detection (without specifying `layers`), the control needs to distinguish between basemap layers and user-added layers. By default, it uses heuristics based on source detection, which may not always be reliable.
+
+For **reliable detection**, provide the `basemapStyleUrl` option with the same URL used for the map's style:
+
+```typescript
+const BASEMAP_STYLE_URL = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+
+const map = new maplibregl.Map({
+  container: 'map',
+  style: BASEMAP_STYLE_URL,
+  center: [0, 0],
+  zoom: 2
+});
+
+map.on('load', () => {
+  // Add your custom layers
+  map.addLayer({
+    id: 'my-custom-layer',
+    type: 'fill',
+    source: 'my-source',
+    paint: { 'fill-color': '#088' }
+  });
+
+  // Create layer control with basemapStyleUrl for reliable detection
+  const layerControl = new LayerControl({
+    collapsed: false,
+    basemapStyleUrl: BASEMAP_STYLE_URL  // All layers from this URL go to "Background"
+  });
+
+  map.addControl(layerControl, 'top-right');
+});
+```
+
+When `basemapStyleUrl` is provided:
+- The control fetches the style JSON and extracts all layer IDs
+- Layers that exist in the basemap style are grouped under "Background"
+- All other layers (user-added) are shown individually in the control
+- New layers added later are automatically detected as user layers
 
 ## Examples
 

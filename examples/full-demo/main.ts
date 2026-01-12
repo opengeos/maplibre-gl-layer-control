@@ -3,10 +3,13 @@ import { LayerControl } from '../../src/index';
 import '../../src/index.css';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
+// Define the basemap style URL as a constant so it can be reused
+const BASEMAP_STYLE_URL = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+
 // Create the map
 const map = new maplibregl.Map({
   container: 'map',
-  style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+  style: BASEMAP_STYLE_URL,
   center: [0, 0], // New York area
   zoom: 2
 });
@@ -134,7 +137,8 @@ map.on('load', () => {
   }, 'countries-layer'); // Insert below countries layer
 
   // Create the layer control AFTER adding custom layers
-  // The control will automatically detect basemap layers by fetching the original style
+  // By providing basemapStyleUrl, the control reliably distinguishes basemap layers
+  // from user-added layers - all basemap layers are grouped under "Background"
   const layerControl = new LayerControl({
     collapsed: false, // Start expanded to show features
     panelWidth: 360,
@@ -143,6 +147,7 @@ map.on('load', () => {
     panelMaxHeight: 400,
     showStyleEditor: true,
     showOpacitySlider: true,
+    basemapStyleUrl: BASEMAP_STYLE_URL, // Enables reliable basemap vs user layer detection
   });
 
   // Add the control to the map

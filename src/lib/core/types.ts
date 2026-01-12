@@ -93,6 +93,13 @@ export interface LayerControlOptions {
   excludeDrawnLayers?: boolean;
   /** Custom layer adapters for non-MapLibre layers (e.g., deck.gl COG layers, Zarr layers) */
   customLayerAdapters?: CustomLayerAdapter[];
+  /**
+   * URL of the basemap style JSON. If provided, all layers defined in this style
+   * will be grouped under "Background", and all other layers will be shown individually
+   * in the layer control. This provides reliable distinction between basemap layers
+   * and user-added layers.
+   */
+  basemapStyleUrl?: string;
 }
 
 /**

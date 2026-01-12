@@ -38,7 +38,7 @@ map.on('load', () => {
   const layerControl = new LayerControl({
     collapsed: false,
     // layerStates,
-    panelWidth: 320,
+    panelWidth: 360,
     showStyleEditor: true
   });
 

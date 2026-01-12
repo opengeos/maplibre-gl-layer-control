@@ -49,6 +49,8 @@ export class LayerControl implements IControl {
   private excludeDrawnLayers: boolean;
   private customLayerRegistry: CustomLayerRegistry | null = null;
   private customLayerUnsubscribe: (() => void) | null = null;
+  private basemapStyleUrl: string | null = null;
+  private basemapLayerIds: Set<string> | null = null;
   private widthSliderEl: HTMLElement | null = null;
   private widthThumbEl: HTMLElement | null = null;
   private widthValueEl: HTMLElement | null = null;
@@ -89,6 +91,9 @@ export class LayerControl implements IControl {
         this.customLayerRegistry!.register(adapter);
       });
     }
+
+    // Store basemap style URL for reliable layer detection
+    this.basemapStyleUrl = options.basemapStyleUrl || null;
   }
 
   /**
@@ -107,11 +112,6 @@ export class LayerControl implements IControl {
       this.initialSourceIds = new Set();
     }
 
-    // Auto-detect layers using source-based heuristics
-    if (Object.keys(this.state.layerStates).length === 0) {
-      this.autoDetectLayers();
-    }
-
     this.container = this.createContainer();
     this.button = this.createToggleButton();
     this.panel = this.createPanel();
@@ -126,8 +126,31 @@ export class LayerControl implements IControl {
     // Setup event listeners
     this.setupEventListeners();
 
-    // Build layer items
-    this.buildLayerItems();
+    // If basemapStyleUrl is provided, fetch it first for reliable layer detection
+    if (this.basemapStyleUrl && !this.basemapLayerIds) {
+      this.fetchBasemapStyle().then(() => {
+        // Auto-detect layers after basemap style is fetched
+        if (Object.keys(this.state.layerStates).length === 0) {
+          this.autoDetectLayers();
+        }
+        // Build layer items
+        this.buildLayerItems();
+      }).catch(error => {
+        console.warn('Failed to fetch basemap style, falling back to heuristic detection:', error);
+        // Fall back to heuristic detection
+        if (Object.keys(this.state.layerStates).length === 0) {
+          this.autoDetectLayers();
+        }
+        this.buildLayerItems();
+      });
+    } else {
+      // Auto-detect layers using source-based heuristics
+      if (Object.keys(this.state.layerStates).length === 0) {
+        this.autoDetectLayers();
+      }
+      // Build layer items
+      this.buildLayerItems();
+    }
 
     // If panel starts expanded, update position after control is added to DOM
     if (!this.state.collapsed) {
@@ -138,6 +161,34 @@ export class LayerControl implements IControl {
     }
 
     return this.container;
+  }
+
+  /**
+   * Fetch the basemap style JSON and extract layer IDs.
+   * This provides reliable distinction between basemap and user-added layers.
+   */
+  private async fetchBasemapStyle(): Promise<void> {
+    if (!this.basemapStyleUrl) return;
+
+    try {
+      const response = await fetch(this.basemapStyleUrl);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const styleJson = await response.json();
+
+      // Extract layer IDs from the basemap style
+      if (styleJson && Array.isArray(styleJson.layers)) {
+        this.basemapLayerIds = new Set(
+          styleJson.layers.map((layer: { id: string }) => layer.id)
+        );
+      } else {
+        this.basemapLayerIds = new Set();
+      }
+    } catch (error) {
+      console.warn('Failed to fetch basemap style from URL:', this.basemapStyleUrl, error);
+      throw error;
+    }
   }
 
   /**
@@ -185,13 +236,15 @@ export class LayerControl implements IControl {
 
     if (this.targetLayers.length === 0) {
       // No layers specified - auto-detect user-added layers vs background layers
-      // Use source-based heuristics to determine which layers are user-added
-
       const userAddedLayers: string[] = [];
       const backgroundLayerIds: string[] = [];
 
-      // First, identify which sources are user-added
-      const userAddedSourceIds = this.detectUserAddedSources();
+      // If basemapLayerIds is available (from fetched style URL), use it for reliable detection
+      // Otherwise fall back to source-based heuristics
+      const useBasemapStyleDetection = this.basemapLayerIds !== null && this.basemapLayerIds.size > 0;
+
+      // First, identify which sources are user-added (only needed for heuristic detection)
+      const userAddedSourceIds = useBasemapStyleDetection ? new Set<string>() : this.detectUserAddedSources();
 
       allLayerIds.forEach(layerId => {
         const layer = this.map.getLayer(layerId);
@@ -203,13 +256,25 @@ export class LayerControl implements IControl {
           return;
         }
 
-        // Check if this layer uses a user-added source
-        const sourceId = (layer as any).source;
-        if (sourceId && userAddedSourceIds.has(sourceId)) {
-          userAddedLayers.push(layerId);
+        if (useBasemapStyleDetection) {
+          // Use basemap style layer IDs for reliable detection
+          if (this.basemapLayerIds!.has(layerId)) {
+            // This layer is from the basemap style
+            backgroundLayerIds.push(layerId);
+          } else {
+            // This layer is not in the basemap style - it's user-added
+            userAddedLayers.push(layerId);
+          }
         } else {
-          // Layer uses a basemap source or has no source (like background color layer)
-          backgroundLayerIds.push(layerId);
+          // Fall back to source-based heuristics
+          // Check if this layer uses a user-added source
+          const sourceId = (layer as any).source;
+          if (sourceId && userAddedSourceIds.has(sourceId)) {
+            userAddedLayers.push(layerId);
+          } else {
+            // Layer uses a basemap source or has no source (like background color layer)
+            backgroundLayerIds.push(layerId);
+          }
         }
       });
 
@@ -1189,7 +1254,17 @@ export class LayerControl implements IControl {
    * Check if a layer is a user-added layer (vs basemap layer)
    */
   private isUserAddedLayer(layerId: string): boolean {
-    return this.state.layerStates[layerId] !== undefined && layerId !== 'Background';
+    // If this layer is in our state (and not Background), it's user-added
+    if (this.state.layerStates[layerId] !== undefined && layerId !== 'Background') {
+      return true;
+    }
+
+    // If we have basemapLayerIds, check if the layer is NOT in the basemap
+    if (this.basemapLayerIds !== null && this.basemapLayerIds.size > 0) {
+      return !this.basemapLayerIds.has(layerId);
+    }
+
+    return false;
   }
 
   /**
@@ -2273,23 +2348,36 @@ export class LayerControl implements IControl {
 
       // Find new layers that aren't in our state yet
       const newLayers: string[] = [];
-      const userAddedSourceIds = isAutoDetectMode ? this.detectUserAddedSources() : new Set<string>();
+
+      // Use basemap style detection if available, otherwise fall back to source-based heuristics
+      const useBasemapStyleDetection = this.basemapLayerIds !== null && this.basemapLayerIds.size > 0;
+      const userAddedSourceIds = (isAutoDetectMode && !useBasemapStyleDetection)
+        ? this.detectUserAddedSources()
+        : new Set<string>();
 
       currentMapLayerIds.forEach(layerId => {
         if (layerId !== 'Background' && !this.state.layerStates[layerId]) {
           const layer = this.map.getLayer(layerId);
           if (layer) {
-            // In auto-detect mode, only add layers that use user-added sources
+            // In auto-detect mode, determine if this is a user-added layer
             if (isAutoDetectMode) {
               // Skip drawn layers if excludeDrawnLayers is enabled
               if (this.excludeDrawnLayers && this.isDrawnLayer(layerId)) {
                 return;
               }
 
-              // Only add layers that use user-added sources
-              const sourceId = (layer as any).source;
-              if (!sourceId || !userAddedSourceIds.has(sourceId)) {
-                return;
+              if (useBasemapStyleDetection) {
+                // Use basemap style layer IDs - if layer is in basemap, skip it
+                if (this.basemapLayerIds!.has(layerId)) {
+                  return;
+                }
+              } else {
+                // Fall back to source-based heuristics
+                // Only add layers that use user-added sources
+                const sourceId = (layer as any).source;
+                if (!sourceId || !userAddedSourceIds.has(sourceId)) {
+                  return;
+                }
               }
             }
             newLayers.push(layerId);
