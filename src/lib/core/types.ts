@@ -55,6 +55,18 @@ export interface CustomLayerAdapter {
    * Returns an unsubscribe function.
    */
   onLayerChange?(callback: (event: 'add' | 'remove', layerId: string) => void): () => void;
+
+  /**
+   * Get the bounds of a layer (optional).
+   * Returns [west, south, east, north] or null if not available.
+   */
+  getBounds?(layerId: string): [number, number, number, number] | null;
+
+  /**
+   * Remove a layer (optional).
+   * Called when user removes a layer via context menu.
+   */
+  removeLayer?(layerId: string): void;
 }
 
 /**
@@ -102,6 +114,16 @@ export interface LayerControlOptions {
    * and user-added layers.
    */
   basemapStyleUrl?: string;
+  /** Whether to enable context menu (right-click) on layers (default: true) */
+  enableContextMenu?: boolean;
+  /** Whether to enable drag-and-drop reordering of layers (default: true) */
+  enableDragAndDrop?: boolean;
+  /** Callback when a layer is renamed via context menu */
+  onLayerRename?: (layerId: string, oldName: string, newName: string) => void;
+  /** Callback when layers are reordered via drag-and-drop */
+  onLayerReorder?: (layerOrder: string[]) => void;
+  /** Callback when a layer is removed via context menu */
+  onLayerRemove?: (layerId: string) => void;
 }
 
 /**
@@ -150,6 +172,38 @@ export interface StyleControlConfig {
 }
 
 /**
+ * Context menu state
+ */
+export interface ContextMenuState {
+  /** Whether the context menu is visible */
+  visible: boolean;
+  /** The layer ID that the context menu is targeting */
+  targetLayerId: string | null;
+  /** X position of the context menu */
+  x: number;
+  /** Y position of the context menu */
+  y: number;
+}
+
+/**
+ * Drag state for layer reordering
+ */
+export interface DragState {
+  /** Whether drag is active */
+  active: boolean;
+  /** The layer ID being dragged */
+  layerId: string | null;
+  /** Starting Y position of the drag */
+  startY: number;
+  /** Current Y position of the drag */
+  currentY: number;
+  /** Placeholder element showing drop location */
+  placeholder: HTMLElement | null;
+  /** The element being dragged (clone) */
+  draggedElement: HTMLElement | null;
+}
+
+/**
  * Internal control state (not exported)
  */
 export interface InternalControlState {
@@ -165,4 +219,12 @@ export interface InternalControlState {
   backgroundLayerVisibility: Map<string, boolean>;
   /** Whether to show only rendered layers in background legend */
   onlyRenderedFilter: boolean;
+  /** Context menu state */
+  contextMenu: ContextMenuState;
+  /** Layer ID currently being renamed */
+  renamingLayerId: string | null;
+  /** Custom layer names set by user (layerId -> customName) */
+  customLayerNames: Map<string, string>;
+  /** Drag state for layer reordering */
+  drag: DragState;
 }

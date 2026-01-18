@@ -141,7 +141,7 @@ map.on('load', () => {
   // from user-added layers - all basemap layers are grouped under "Background"
   const layerControl = new LayerControl({
     collapsed: false, // Start expanded to show features
-    panelWidth: 360,
+    panelWidth: 350,
     panelMinWidth: 240,
     panelMaxWidth: 450,
     panelMaxHeight: 400,
