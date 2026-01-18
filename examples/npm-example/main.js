@@ -90,7 +90,7 @@ map.on('load', () => {
   const layerControl = new LayerControl({
     collapsed: false,
     layers: ['regions-fill', 'regions-outline', 'regions-points'],
-    panelWidth: 360,
+    panelWidth: 350,
     panelMinWidth: 240,
     panelMaxWidth: 450
   });

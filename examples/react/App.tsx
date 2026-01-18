@@ -141,7 +141,7 @@ export default function App() {
           position="top-right"
           collapsed={false}
           layers={['countries-layer', 'countries-outline', 'country-points']}
-          panelWidth={360}
+          panelWidth={350}
           panelMinWidth={240}
           panelMaxWidth={450}
         />

@@ -83,7 +83,7 @@ map.on('load', () => {
 
   const layerControl = new LayerControl({
     collapsed: false,
-    panelWidth: 360,
+    panelWidth: 350,
     panelMinWidth: 240,
     panelMaxWidth: 450,
     showStyleEditor: true,
@@ -133,7 +133,7 @@ map.on('load', () => {
       type: 'fill',
       source: sourceId,
       paint: {
-        'fill-color': `hsl(${Math.random() * 360}, 70%, 50%)`,
+        'fill-color': `hsl(${Math.random() * 350}, 70%, 50%)`,
         'fill-opacity': 0.5
       }
     });

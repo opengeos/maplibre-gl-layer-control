@@ -62,6 +62,14 @@ export class LayerControl implements IControl {
   private widthDragStartWidth: number | null = null;
   private widthFrame: number | null = null;
 
+  // Context menu and drag-drop
+  private contextMenuEl: HTMLDivElement | null = null;
+  private enableContextMenu: boolean;
+  private enableDragAndDrop: boolean;
+  private onLayerRename?: (layerId: string, oldName: string, newName: string) => void;
+  private onLayerReorder?: (layerOrder: string[]) => void;
+  private onLayerRemove?: (layerId: string) => void;
+
   constructor(options: LayerControlOptions = {}) {
     this.minPanelWidth = options.panelMinWidth || 240;
     this.maxPanelWidth = options.panelMaxWidth || 420;
@@ -72,9 +80,16 @@ export class LayerControl implements IControl {
     this.excludeDrawnLayers = options.excludeDrawnLayers !== false;
     this.excludeLayerPatterns = this.wildcardPatternsToRegex(options.excludeLayers || []);
 
+    // Context menu and drag-drop options
+    this.enableContextMenu = options.enableContextMenu !== false;
+    this.enableDragAndDrop = options.enableDragAndDrop !== false;
+    this.onLayerRename = options.onLayerRename;
+    this.onLayerReorder = options.onLayerReorder;
+    this.onLayerRemove = options.onLayerRemove;
+
     this.state = {
       collapsed: options.collapsed !== false,
-      panelWidth: options.panelWidth || 360,
+      panelWidth: options.panelWidth || 350,
       activeStyleEditor: null,
       layerStates: options.layerStates || {},
       originalStyles: new Map<string, OriginalStyle>(),
@@ -82,6 +97,22 @@ export class LayerControl implements IControl {
       backgroundLegendOpen: false,
       backgroundLayerVisibility: new Map<string, boolean>(),
       onlyRenderedFilter: false,
+      contextMenu: {
+        visible: false,
+        targetLayerId: null,
+        x: 0,
+        y: 0,
+      },
+      renamingLayerId: null,
+      customLayerNames: new Map<string, string>(),
+      drag: {
+        active: false,
+        layerId: null,
+        startY: 0,
+        currentY: 0,
+        placeholder: null,
+        draggedElement: null,
+      },
     };
 
     this.targetLayers = options.layers || Object.keys(this.state.layerStates);
@@ -129,6 +160,12 @@ export class LayerControl implements IControl {
     this.container.appendChild(this.button);
     // Append panel to map container for independent positioning (avoids overlap with other controls)
     this.mapContainer.appendChild(this.panel);
+
+    // Create context menu element (appended to map container)
+    if (this.enableContextMenu) {
+      this.contextMenuEl = this.createContextMenu();
+      this.mapContainer.appendChild(this.contextMenuEl);
+    }
 
     // Now that panel is attached, update width display
     this.updateWidthDisplay();
@@ -224,6 +261,15 @@ export class LayerControl implements IControl {
       this.map.off('resize', this.mapResizeHandler);
       this.mapResizeHandler = null;
     }
+
+    // Clean up context menu
+    if (this.contextMenuEl) {
+      this.contextMenuEl.parentNode?.removeChild(this.contextMenuEl);
+      this.contextMenuEl = null;
+    }
+
+    // Clean up any active drag state
+    this.cleanupDragState();
 
     // Remove panel from map container
     this.panel.parentNode?.removeChild(this.panel);
@@ -477,7 +523,7 @@ export class LayerControl implements IControl {
           try {
             const url = new URL(src.data);
             const isBasemap = knownBasemapProviders.some(p => url.hostname.includes(p)) ||
-                              basemapDomains.has(url.hostname);
+              basemapDomains.has(url.hostname);
             if (!isBasemap) {
               userAddedSources.add(sourceId);
             }
@@ -978,9 +1024,18 @@ export class LayerControl implements IControl {
     // Toggle button click
     this.button.addEventListener('click', () => this.toggle());
 
-    // Click outside to close (check both container and panel since they're now separate)
+    // Click outside to close panel and context menu
     document.addEventListener('click', (e) => {
       const target = e.target as Node;
+
+      // Close context menu if clicking outside of it
+      if (this.contextMenuEl && this.state.contextMenu.visible) {
+        if (!this.contextMenuEl.contains(target)) {
+          this.hideContextMenu();
+        }
+      }
+
+      // Close panel if clicking outside
       if (!this.container.contains(target) && !this.panel.contains(target)) {
         this.collapse();
       }
@@ -1098,6 +1153,17 @@ export class LayerControl implements IControl {
     const row = document.createElement('div');
     row.className = 'layer-control-row';
 
+    // Add drag handle (disabled for Background layer for alignment)
+    if (this.enableDragAndDrop) {
+      if (layerId === 'Background') {
+        const disabledHandle = this.createDisabledDragHandle();
+        row.appendChild(disabledHandle);
+      } else {
+        const dragHandle = this.createDragHandle(layerId);
+        row.appendChild(dragHandle);
+      }
+    }
+
     // Visibility checkbox
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
@@ -1107,11 +1173,12 @@ export class LayerControl implements IControl {
       this.toggleLayerVisibility(layerId, checkbox.checked);
     });
 
-    // Layer name
+    // Layer name - use custom name if set
+    const displayName = this.state.customLayerNames.get(layerId) || state.name || layerId;
     const name = document.createElement('span');
     name.className = 'layer-control-name';
-    name.textContent = state.name || layerId;
-    name.title = state.name || layerId;
+    name.textContent = displayName;
+    name.title = displayName;
 
     row.appendChild(checkbox);
 
@@ -1172,6 +1239,16 @@ export class LayerControl implements IControl {
     }
 
     item.appendChild(row);
+
+    // Add context menu event listener (skip for Background layer)
+    if (this.enableContextMenu && layerId !== 'Background') {
+      row.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.showContextMenu(layerId, e.clientX, e.clientY);
+      });
+    }
+
     this.panel.appendChild(item);
   }
 
@@ -2156,7 +2233,7 @@ export class LayerControl implements IControl {
 
     // Raster Hue Rotate
     const hueRotate = this.map.getPaintProperty(layerId, 'raster-hue-rotate');
-    this.createSliderControl(container, layerId, 'raster-hue-rotate', 'Hue Rotate', typeof hueRotate === 'number' ? hueRotate : 0, 0, 360, 5);
+    this.createSliderControl(container, layerId, 'raster-hue-rotate', 'Hue Rotate', typeof hueRotate === 'number' ? hueRotate : 0, 0, 350, 5);
   }
 
   /**
@@ -2430,7 +2507,14 @@ export class LayerControl implements IControl {
         if (layerId !== 'Background' && !this.state.layerStates[layerId]) {
           const layer = this.map.getLayer(layerId);
           if (layer) {
-            // In auto-detect mode, determine if this is a user-added layer
+            // Always skip layers that were present when control was initialized
+            // These are background/basemap layers and should stay grouped under "Background"
+            if (this.initialLayerIds !== null && this.initialLayerIds.has(layerId)) {
+              // Layer was in initial set - it's a background layer, skip it
+              return;
+            }
+
+            // In auto-detect mode, apply additional filtering
             if (isAutoDetectMode) {
               // Skip drawn layers if excludeDrawnLayers is enabled
               if (this.excludeDrawnLayers && this.isDrawnLayer(layerId)) {
@@ -2439,6 +2523,11 @@ export class LayerControl implements IControl {
 
               // Skip layers matching user-defined exclusion patterns
               if (this.isExcludedByPattern(layerId)) {
+                return;
+              }
+
+              // Skip layers that are not user-added (i.e., background/basemap layers)
+              if (!this.isUserAddedLayer(layerId)) {
                 return;
               }
 
@@ -2597,5 +2686,745 @@ export class LayerControl implements IControl {
     if (this.panel) {
       this.checkForNewLayers();
     }
+  }
+
+  // ===== Context Menu Methods =====
+
+  /**
+   * Create context menu element
+   */
+  private createContextMenu(): HTMLDivElement {
+    const menu = document.createElement('div');
+    menu.className = 'layer-control-context-menu';
+    menu.style.display = 'none';
+
+    // Rename
+    const renameItem = this.createContextMenuItem('Rename', '✏️', () => {
+      if (this.state.contextMenu.targetLayerId) {
+        this.startRenaming(this.state.contextMenu.targetLayerId);
+      }
+      this.hideContextMenu();
+    });
+
+    // Zoom to layer
+    const zoomItem = this.createContextMenuItem('Zoom to Layer', '🔍', () => {
+      if (this.state.contextMenu.targetLayerId) {
+        this.zoomToLayer(this.state.contextMenu.targetLayerId);
+      }
+      this.hideContextMenu();
+    });
+
+    // Separator
+    const sep1 = document.createElement('div');
+    sep1.className = 'context-menu-separator';
+
+    // Move up
+    const moveUpItem = this.createContextMenuItem('Move Up', '↑', () => {
+      if (this.state.contextMenu.targetLayerId) {
+        this.moveLayerUp(this.state.contextMenu.targetLayerId);
+      }
+      this.hideContextMenu();
+    });
+
+    // Move to top
+    const moveTopItem = this.createContextMenuItem('Move to Top', '⤒', () => {
+      if (this.state.contextMenu.targetLayerId) {
+        this.moveLayerToTop(this.state.contextMenu.targetLayerId);
+      }
+      this.hideContextMenu();
+    });
+
+    // Move down
+    const moveDownItem = this.createContextMenuItem('Move Down', '↓', () => {
+      if (this.state.contextMenu.targetLayerId) {
+        this.moveLayerDown(this.state.contextMenu.targetLayerId);
+      }
+      this.hideContextMenu();
+    });
+
+    // Move to bottom
+    const moveBottomItem = this.createContextMenuItem('Move to Bottom', '⤓', () => {
+      if (this.state.contextMenu.targetLayerId) {
+        this.moveLayerToBottom(this.state.contextMenu.targetLayerId);
+      }
+      this.hideContextMenu();
+    });
+
+    // Separator
+    const sep2 = document.createElement('div');
+    sep2.className = 'context-menu-separator';
+
+    // Remove layer
+    const removeItem = this.createContextMenuItem('Remove Layer', '🗑️', () => {
+      if (this.state.contextMenu.targetLayerId) {
+        this.removeLayer(this.state.contextMenu.targetLayerId);
+      }
+      this.hideContextMenu();
+    }, true);
+
+    menu.appendChild(renameItem);
+    menu.appendChild(zoomItem);
+    menu.appendChild(sep1);
+    menu.appendChild(moveUpItem);
+    menu.appendChild(moveTopItem);
+    menu.appendChild(moveDownItem);
+    menu.appendChild(moveBottomItem);
+    menu.appendChild(sep2);
+    menu.appendChild(removeItem);
+
+    return menu;
+  }
+
+  /**
+   * Create a context menu item
+   */
+  private createContextMenuItem(
+    label: string,
+    icon: string,
+    onClick: () => void,
+    isDanger = false
+  ): HTMLDivElement {
+    const item = document.createElement('div');
+    item.className = 'context-menu-item' + (isDanger ? ' context-menu-item-danger' : '');
+
+    const iconEl = document.createElement('span');
+    iconEl.className = 'context-menu-item-icon';
+    iconEl.textContent = icon;
+
+    const labelEl = document.createElement('span');
+    labelEl.className = 'context-menu-item-label';
+    labelEl.textContent = label;
+
+    item.appendChild(iconEl);
+    item.appendChild(labelEl);
+
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onClick();
+    });
+
+    return item;
+  }
+
+  /**
+   * Show context menu at position
+   */
+  private showContextMenu(layerId: string, x: number, y: number): void {
+    if (!this.contextMenuEl) return;
+
+    // Update state
+    this.state.contextMenu = {
+      visible: true,
+      targetLayerId: layerId,
+      x,
+      y,
+    };
+
+    // Position the menu relative to the map container
+    const mapRect = this.mapContainer.getBoundingClientRect();
+    let menuX = x - mapRect.left;
+    let menuY = y - mapRect.top;
+
+    // Show menu to get dimensions
+    this.contextMenuEl.style.display = 'block';
+
+    // Adjust if menu would go off screen
+    const menuRect = this.contextMenuEl.getBoundingClientRect();
+    if (menuX + menuRect.width > mapRect.width) {
+      menuX = mapRect.width - menuRect.width - 5;
+    }
+    if (menuY + menuRect.height > mapRect.height) {
+      menuY = mapRect.height - menuRect.height - 5;
+    }
+
+    this.contextMenuEl.style.left = `${menuX}px`;
+    this.contextMenuEl.style.top = `${menuY}px`;
+  }
+
+  /**
+   * Hide context menu
+   */
+  private hideContextMenu(): void {
+    if (!this.contextMenuEl) return;
+
+    this.state.contextMenu = {
+      visible: false,
+      targetLayerId: null,
+      x: 0,
+      y: 0,
+    };
+
+    this.contextMenuEl.style.display = 'none';
+  }
+
+  /**
+   * Start renaming a layer
+   */
+  private startRenaming(layerId: string): void {
+    const itemEl = this.panel.querySelector(`[data-layer-id="${layerId}"]`);
+    if (!itemEl) return;
+
+    const nameEl = itemEl.querySelector('.layer-control-name');
+    if (!nameEl) return;
+
+    this.state.renamingLayerId = layerId;
+
+    const currentName = this.state.customLayerNames.get(layerId) ||
+      this.state.layerStates[layerId]?.name ||
+      layerId;
+
+    // Replace name span with input
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'layer-control-name-input';
+    input.value = currentName;
+
+    const finishRename = () => {
+      const newName = input.value.trim() || currentName;
+      const oldName = currentName;
+
+      if (newName !== oldName) {
+        this.state.customLayerNames.set(layerId, newName);
+        if (this.state.layerStates[layerId]) {
+          this.state.layerStates[layerId].name = newName;
+        }
+        this.onLayerRename?.(layerId, oldName, newName);
+      }
+
+      // Restore name span
+      const newNameEl = document.createElement('span');
+      newNameEl.className = 'layer-control-name';
+      newNameEl.textContent = newName;
+      newNameEl.title = newName;
+      input.replaceWith(newNameEl);
+
+      this.state.renamingLayerId = null;
+    };
+
+    input.addEventListener('blur', finishRename);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        finishRename();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        // Restore original name
+        const newNameEl = document.createElement('span');
+        newNameEl.className = 'layer-control-name';
+        newNameEl.textContent = currentName;
+        newNameEl.title = currentName;
+        input.replaceWith(newNameEl);
+        this.state.renamingLayerId = null;
+      }
+    });
+
+    nameEl.replaceWith(input);
+    input.focus();
+    input.select();
+  }
+
+  /**
+   * Zoom to a layer's bounds
+   */
+  private zoomToLayer(layerId: string): void {
+    // Check if it's a custom layer with getBounds support
+    const layerState = this.state.layerStates[layerId];
+    if (layerState?.isCustomLayer && this.customLayerRegistry) {
+      const bounds = this.customLayerRegistry.getBounds(layerId);
+      if (bounds) {
+        this.map.fitBounds(bounds as [number, number, number, number], { padding: 50 });
+        return;
+      }
+    }
+
+    // For native MapLibre layers, try to get bounds from features
+    const layer = this.map.getLayer(layerId);
+    if (!layer) return;
+
+    try {
+      // First try querySourceFeatures for all features
+      const sourceId = (layer as any).source;
+      let features = sourceId ? this.map.querySourceFeatures(sourceId) : [];
+
+      // If no source features, try rendered features
+      if (features.length === 0) {
+        features = this.map.queryRenderedFeatures({ layers: [layerId] });
+      }
+
+      if (features.length === 0) return;
+
+      // Calculate bounds
+      let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+
+      features.forEach(feature => {
+        if (!feature.geometry) return;
+
+        const processCoords = (coords: any) => {
+          if (typeof coords[0] === 'number') {
+            const [lng, lat] = coords;
+            minLng = Math.min(minLng, lng);
+            minLat = Math.min(minLat, lat);
+            maxLng = Math.max(maxLng, lng);
+            maxLat = Math.max(maxLat, lat);
+          } else {
+            coords.forEach(processCoords);
+          }
+        };
+
+        if (feature.geometry.type === 'Point') {
+          processCoords((feature.geometry as any).coordinates);
+        } else if (feature.geometry.type === 'LineString' || feature.geometry.type === 'MultiPoint') {
+          (feature.geometry as any).coordinates.forEach(processCoords);
+        } else if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiLineString') {
+          (feature.geometry as any).coordinates.forEach((ring: any) => ring.forEach(processCoords));
+        } else if (feature.geometry.type === 'MultiPolygon') {
+          (feature.geometry as any).coordinates.forEach((polygon: any) =>
+            polygon.forEach((ring: any) => ring.forEach(processCoords))
+          );
+        }
+      });
+
+      if (minLng !== Infinity && minLat !== Infinity && maxLng !== -Infinity && maxLat !== -Infinity) {
+        this.map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 50 });
+      }
+    } catch (error) {
+      console.warn(`Failed to zoom to layer ${layerId}:`, error);
+    }
+  }
+
+  /**
+   * Get user layer IDs in current map order (top to bottom in UI = high z-index to low)
+   */
+  private getUserLayerIdsInMapOrder(): string[] {
+    const style = this.map.getStyle();
+    if (!style?.layers) return [];
+
+    // Get map layers in their actual order (low index = rendered first/bottom)
+    const mapLayerIds = style.layers.map(l => l.id);
+
+    // Filter to only user layers that are in our state
+    const userLayerIds = Object.keys(this.state.layerStates).filter(id => id !== 'Background');
+
+    // Sort by map order (reversed: high index = top in UI)
+    return userLayerIds
+      .filter(id => mapLayerIds.includes(id))
+      .sort((a, b) => mapLayerIds.indexOf(b) - mapLayerIds.indexOf(a));
+  }
+
+  /**
+   * Move a layer up in UI (higher rendering order = move to higher z-index)
+   */
+  private moveLayerUp(layerId: string): void {
+    const layerIds = this.getUserLayerIdsInMapOrder();
+    const index = layerIds.indexOf(layerId);
+    if (index <= 0) return; // Already at top or not found
+
+    // UI: [0]=top, [1], [2], ... [n]=bottom
+    // Map array: bottom to top (low index = low z-index)
+    // moveLayer(id, beforeId) moves id to render BELOW beforeId
+
+    try {
+      if (index === 1) {
+        // Moving to the top position - use moveLayer without beforeId
+        this.map.moveLayer(layerId);
+      } else {
+        // Move this layer to be just below the layer that's 2 positions above
+        // This places it between layerIds[index-2] and layerIds[index-1]
+        const targetBeforeId = layerIds[index - 2];
+        this.map.moveLayer(layerId, targetBeforeId);
+      }
+    } catch (e) {
+      // Ignore errors for custom layers
+    }
+
+    // Rebuild UI
+    this.rebuildLayerItems();
+    this.onLayerReorder?.(this.getUserLayerIdsInMapOrder());
+  }
+
+  /**
+   * Move a layer to the top (highest rendering order)
+   */
+  private moveLayerToTop(layerId: string): void {
+    // Move in MapLibre - no beforeId means move to top (highest z-index)
+    try {
+      this.map.moveLayer(layerId);
+    } catch (e) {
+      // Ignore errors for custom layers
+    }
+
+    // Rebuild UI
+    this.rebuildLayerItems();
+    this.onLayerReorder?.(this.getUserLayerIdsInMapOrder());
+  }
+
+  /**
+   * Move a layer down in UI (lower rendering order = move to lower z-index)
+   */
+  private moveLayerDown(layerId: string): void {
+    const layerIds = this.getUserLayerIdsInMapOrder();
+    const index = layerIds.indexOf(layerId);
+    if (index < 0 || index >= layerIds.length - 1) return; // Already at bottom or not found
+
+    // The layer below in UI is at index + 1, which has lower z-index in map
+    // To move our layer below it, we call moveLayer(layerId, belowLayerId)
+    // This puts layerId just below belowLayerId in rendering order
+    const belowLayerId = layerIds[index + 1];
+
+    try {
+      this.map.moveLayer(layerId, belowLayerId);
+    } catch (e) {
+      // Ignore errors for custom layers
+    }
+
+    // Rebuild UI
+    this.rebuildLayerItems();
+    this.onLayerReorder?.(this.getUserLayerIdsInMapOrder());
+  }
+
+  /**
+   * Move a layer to the bottom (lowest rendering order among user layers)
+   */
+  private moveLayerToBottom(layerId: string): void {
+    const layerIds = this.getUserLayerIdsInMapOrder();
+    if (layerIds.length <= 1) return;
+
+    const index = layerIds.indexOf(layerId);
+    if (index < 0 || index === layerIds.length - 1) return; // Not found or already at bottom
+
+    // The bottom layer in UI has the lowest z-index among user layers
+    const bottomLayerId = layerIds[layerIds.length - 1];
+
+    try {
+      // Move this layer to be just below the current bottom layer
+      this.map.moveLayer(layerId, bottomLayerId);
+    } catch (e) {
+      // Ignore errors for custom layers
+    }
+
+    // Rebuild UI
+    this.rebuildLayerItems();
+    this.onLayerReorder?.(this.getUserLayerIdsInMapOrder());
+  }
+
+  /**
+   * Remove a layer from the map
+   */
+  private removeLayer(layerId: string): void {
+    const layerState = this.state.layerStates[layerId];
+
+    // Check if it's a custom layer
+    if (layerState?.isCustomLayer && this.customLayerRegistry) {
+      this.customLayerRegistry.removeLayer(layerId);
+    } else {
+      // Remove native MapLibre layer
+      try {
+        const layer = this.map.getLayer(layerId);
+        if (layer) {
+          const sourceId = (layer as any).source;
+          this.map.removeLayer(layerId);
+
+          // Check if source is still used by other layers
+          if (sourceId) {
+            const style = this.map.getStyle();
+            const sourceStillUsed = style?.layers?.some(l => (l as any).source === sourceId);
+            if (!sourceStillUsed) {
+              try {
+                this.map.removeSource(sourceId);
+              } catch (e) {
+                // Source might not exist or be in use
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.warn(`Failed to remove layer ${layerId}:`, error);
+      }
+    }
+
+    // Remove from state
+    delete this.state.layerStates[layerId];
+    this.state.customLayerNames.delete(layerId);
+
+    // Remove from UI
+    const itemEl = this.panel.querySelector(`[data-layer-id="${layerId}"]`);
+    if (itemEl) {
+      itemEl.remove();
+    }
+
+    // Call callback
+    this.onLayerRemove?.(layerId);
+  }
+
+  /**
+   * Rebuild layer items to reflect current order
+   */
+  private rebuildLayerItems(): void {
+    // Get user layer IDs in current map order
+    const userLayerIds = this.getUserLayerIdsInMapOrder();
+
+    // Update state order
+    const newLayerStates: { [key: string]: LayerState } = {};
+
+    // Add Background first if it exists
+    if (this.state.layerStates['Background']) {
+      newLayerStates['Background'] = this.state.layerStates['Background'];
+    }
+
+    // Add user layers in sorted order
+    userLayerIds.forEach((id: string) => {
+      if (this.state.layerStates[id]) {
+        newLayerStates[id] = this.state.layerStates[id];
+      }
+    });
+
+    this.state.layerStates = newLayerStates;
+
+    // Rebuild UI
+    this.buildLayerItems();
+  }
+
+  // ===== Drag and Drop Methods =====
+
+  /**
+   * Create drag handle element
+   */
+  private createDragHandle(layerId: string): HTMLDivElement {
+    const handle = document.createElement('div');
+    handle.className = 'layer-control-drag-handle';
+    handle.innerHTML = `<svg viewBox="0 0 16 16" fill="currentColor">
+      <circle cx="5" cy="3" r="1.5"/>
+      <circle cx="11" cy="3" r="1.5"/>
+      <circle cx="5" cy="8" r="1.5"/>
+      <circle cx="11" cy="8" r="1.5"/>
+      <circle cx="5" cy="13" r="1.5"/>
+      <circle cx="11" cy="13" r="1.5"/>
+    </svg>`;
+    handle.title = 'Drag to reorder';
+
+    // Pointer events for dragging
+    handle.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.startDrag(layerId, e);
+    });
+
+    return handle;
+  }
+
+  /**
+   * Create a disabled drag handle for alignment (used for Background layer)
+   */
+  private createDisabledDragHandle(): HTMLDivElement {
+    const handle = document.createElement('div');
+    handle.className = 'layer-control-drag-handle layer-control-drag-handle-disabled';
+    handle.innerHTML = `<svg viewBox="0 0 16 16" fill="currentColor">
+      <circle cx="5" cy="3" r="1.5"/>
+      <circle cx="11" cy="3" r="1.5"/>
+      <circle cx="5" cy="8" r="1.5"/>
+      <circle cx="11" cy="8" r="1.5"/>
+      <circle cx="5" cy="13" r="1.5"/>
+      <circle cx="11" cy="13" r="1.5"/>
+    </svg>`;
+    return handle;
+  }
+
+  /**
+   * Start dragging a layer
+   */
+  private startDrag(layerId: string, e: PointerEvent): void {
+    const itemEl = this.panel.querySelector(`[data-layer-id="${layerId}"]`) as HTMLElement;
+    if (!itemEl) return;
+
+    // Get item rect before any modifications
+    const rect = itemEl.getBoundingClientRect();
+
+    // Set up drag state
+    this.state.drag = {
+      active: true,
+      layerId,
+      startY: e.clientY,
+      currentY: e.clientY,
+      placeholder: null,
+      draggedElement: null,
+    };
+
+    // Add dragging class to panel
+    this.panel.classList.add('dragging-active');
+
+    // Hide original first (before creating clone to avoid visual jump)
+    itemEl.classList.add('dragging');
+
+    // Create placeholder at original position
+    const placeholder = document.createElement('div');
+    placeholder.className = 'layer-control-drop-placeholder';
+    placeholder.style.height = `${rect.height}px`;
+    itemEl.parentNode?.insertBefore(placeholder, itemEl);
+    this.state.drag.placeholder = placeholder;
+
+    // Create floating clone
+    const clone = itemEl.cloneNode(true) as HTMLElement;
+    clone.classList.remove('dragging');
+    clone.className = 'layer-control-item layer-control-item-dragging';
+    clone.style.width = `${rect.width}px`;
+    clone.style.left = `${rect.left}px`;
+    clone.style.top = `${rect.top}px`;
+    document.body.appendChild(clone);
+    this.state.drag.draggedElement = clone;
+
+    // Set up move and end handlers on document
+    const onMove = (moveE: PointerEvent) => this.onDragMove(moveE);
+    const onEnd = (endE: PointerEvent) => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onEnd);
+      document.removeEventListener('pointercancel', onEnd);
+      this.endDrag(endE);
+    };
+
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onEnd);
+    document.addEventListener('pointercancel', onEnd);
+  }
+
+  /**
+   * Handle drag move
+   */
+  private onDragMove(e: PointerEvent): void {
+    if (!this.state.drag.active || !this.state.drag.draggedElement) return;
+
+    const placeholder = this.state.drag.placeholder;
+    if (!placeholder) return;
+
+    // Move the floating element
+    const deltaY = e.clientY - this.state.drag.startY;
+    const clone = this.state.drag.draggedElement;
+    const currentTop = parseFloat(clone.style.top) || 0;
+    clone.style.top = `${currentTop + deltaY}px`;
+    this.state.drag.startY = e.clientY;
+    this.state.drag.currentY = e.clientY;
+
+    // Get all layer items (excluding the one being dragged and Background)
+    const items = Array.from(this.panel.querySelectorAll('.layer-control-item:not(.dragging)'))
+      .filter(item => (item as HTMLElement).dataset.layerId !== 'Background') as HTMLElement[];
+
+    // Find which item we're hovering over
+    for (const item of items) {
+      const itemRect = item.getBoundingClientRect();
+
+      // Check if cursor is within this item's vertical bounds
+      if (e.clientY >= itemRect.top && e.clientY <= itemRect.bottom) {
+        const itemMiddle = itemRect.top + itemRect.height / 2;
+
+        if (e.clientY < itemMiddle) {
+          // Insert placeholder before this item (if not already there)
+          if (placeholder.nextSibling !== item) {
+            item.parentNode?.insertBefore(placeholder, item);
+          }
+        } else {
+          // Insert placeholder after this item (if not already there)
+          if (placeholder.previousSibling !== item) {
+            item.parentNode?.insertBefore(placeholder, item.nextSibling);
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  /**
+   * End dragging
+   */
+  private endDrag(_e: PointerEvent): void {
+    if (!this.state.drag.active) return;
+
+    const layerId = this.state.drag.layerId;
+    const placeholder = this.state.drag.placeholder;
+
+    // Get the original item
+    const itemEl = this.panel.querySelector(`[data-layer-id="${layerId}"]`) as HTMLElement;
+
+    if (itemEl && placeholder) {
+      // Move item to placeholder position
+      placeholder.parentNode?.insertBefore(itemEl, placeholder);
+      itemEl.classList.remove('dragging');
+    }
+
+    // Clean up
+    this.cleanupDragState();
+
+    // Update map layer order based on UI order
+    this.applyUIOrderToMap();
+  }
+
+  /**
+   * Clean up drag state
+   */
+  private cleanupDragState(): void {
+    // Remove floating element
+    if (this.state.drag.draggedElement) {
+      this.state.drag.draggedElement.remove();
+    }
+
+    // Remove placeholder
+    if (this.state.drag.placeholder) {
+      this.state.drag.placeholder.remove();
+    }
+
+    // Remove dragging class from panel
+    this.panel.classList.remove('dragging-active');
+
+    // Remove dragging class from any items
+    this.panel.querySelectorAll('.layer-control-item.dragging').forEach(el => {
+      el.classList.remove('dragging');
+    });
+
+    // Reset drag state
+    this.state.drag = {
+      active: false,
+      layerId: null,
+      startY: 0,
+      currentY: 0,
+      placeholder: null,
+      draggedElement: null,
+    };
+  }
+
+  /**
+   * Apply UI order to map layers
+   */
+  private applyUIOrderToMap(): void {
+    // Get layer items in current UI order
+    const items = this.panel.querySelectorAll('.layer-control-item');
+    const uiLayerIds: string[] = [];
+
+    items.forEach(item => {
+      const layerId = (item as HTMLElement).dataset.layerId;
+      if (layerId && layerId !== 'Background') {
+        uiLayerIds.push(layerId);
+      }
+    });
+
+    // UI shows top layer first, but we need to move layers in reverse order
+    // to maintain the correct stacking
+    const reversedIds = [...uiLayerIds].reverse();
+
+    // Move each layer to its correct position
+    for (let i = 0; i < reversedIds.length; i++) {
+      const layerId = reversedIds[i];
+      const beforeId = i > 0 ? reversedIds[i - 1] : undefined;
+
+      try {
+        // Check if layer exists in map
+        const layer = this.map.getLayer(layerId);
+        if (layer) {
+          this.map.moveLayer(layerId, beforeId);
+        }
+      } catch (e) {
+        // Ignore errors for custom layers
+      }
+    }
+
+    // Call callback
+    this.onLayerReorder?.(uiLayerIds);
   }
 }

@@ -62,7 +62,7 @@ map.on('load', () => {
   const layerControl = new LayerControl({
     collapsed: false,
     layers: ['sample-fill', 'sample-outline'], // Only control these layers explicitly
-    panelWidth: 360,
+    panelWidth: 350,
   });
 
   map.addControl(layerControl, 'top-right');

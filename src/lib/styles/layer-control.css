@@ -232,7 +232,10 @@
 }
 
 .layer-control-opacity {
-  flex: 0 0 140px;
+  flex: 0 0 auto;
+  width: 100px;
+  min-width: 100px;
+  max-width: 100px;
   height: 16px;
   margin: 0;
   cursor: pointer;
@@ -240,7 +243,6 @@
   border-radius: 8px;
   appearance: none;
   outline: none;
-  width: auto;
 }
 
 .layer-control-opacity::-webkit-slider-thumb {
@@ -893,4 +895,168 @@
   background: #f0f4f8;
   border-radius: 4px;
   border-left: 3px solid #2f6fed;
+}
+
+/* ===== Context Menu Styles ===== */
+.layer-control-context-menu {
+  position: absolute;
+  z-index: 1001;
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  min-width: 180px;
+  padding: 4px 0;
+  font-size: 12px;
+  user-select: none;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  cursor: pointer;
+  color: #333;
+  transition: background-color 0.1s ease;
+}
+
+.context-menu-item:hover {
+  background: #f5f7fa;
+}
+
+.context-menu-item:active {
+  background: #e8ecf0;
+}
+
+.context-menu-item-icon {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  font-size: 14px;
+}
+
+.context-menu-item-label {
+  flex: 1;
+}
+
+.context-menu-item-danger {
+  color: #dc3545;
+}
+
+.context-menu-item-danger:hover {
+  background: #fef2f2;
+}
+
+.context-menu-item-danger .context-menu-item-icon {
+  color: #dc3545;
+}
+
+.context-menu-item[disabled] {
+  color: #aaa;
+  cursor: not-allowed;
+}
+
+.context-menu-item[disabled]:hover {
+  background: transparent;
+}
+
+.context-menu-separator {
+  height: 1px;
+  background: #e8e8e8;
+  margin: 4px 0;
+}
+
+/* Layer name input for renaming */
+.layer-control-name-input {
+  flex: 1;
+  min-width: 80px;
+  padding: 2px 6px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid #2f6fed;
+  border-radius: 3px;
+  outline: none;
+  background: #fff;
+  color: #333;
+}
+
+.layer-control-name-input:focus {
+  box-shadow: 0 0 0 2px rgba(47, 111, 237, 0.2);
+}
+
+/* ===== Drag and Drop Styles ===== */
+.layer-control-drag-handle {
+  width: 16px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  color: #999;
+  font-size: 12px;
+  flex-shrink: 0;
+  touch-action: none;
+  transition: color 0.1s ease;
+}
+
+.layer-control-drag-handle:hover {
+  color: #666;
+}
+
+.layer-control-drag-handle:active {
+  cursor: grabbing;
+}
+
+.layer-control-drag-handle-disabled {
+  color: #ddd;
+  cursor: default;
+  pointer-events: none;
+}
+
+.layer-control-drag-handle-disabled:hover {
+  color: #ddd;
+}
+
+.layer-control-drag-handle svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Dragging state for the item */
+.layer-control-item.dragging {
+  opacity: 0.5;
+}
+
+/* Floating dragged element */
+.layer-control-item-dragging {
+  position: fixed;
+  z-index: 1002;
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+  padding: 4px 8px;
+  opacity: 0.95;
+}
+
+/* Drop placeholder */
+.layer-control-drop-placeholder {
+  background: #e8f0fe;
+  border: 2px dashed #2f6fed;
+  border-radius: 4px;
+  margin: 2px 0;
+  min-height: 32px;
+  box-sizing: border-box;
+}
+
+/* Prevent text selection during drag */
+.layer-control-panel.dragging-active {
+  user-select: none;
+}
+
+.layer-control-panel.dragging-active * {
+  cursor: grabbing !important;
 }

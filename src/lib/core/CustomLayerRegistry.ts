@@ -133,6 +133,33 @@ export class CustomLayerRegistry {
   }
 
   /**
+   * Get the bounds of a custom layer (for zoom-to-layer).
+   * @param layerId The layer ID
+   * @returns The bounds [west, south, east, north] or null if not available
+   */
+  getBounds(layerId: string): [number, number, number, number] | null {
+    const adapter = this.getAdapterForLayer(layerId);
+    if (adapter && adapter.getBounds) {
+      return adapter.getBounds(layerId);
+    }
+    return null;
+  }
+
+  /**
+   * Remove a custom layer through its adapter.
+   * @param layerId The layer ID to remove
+   * @returns true if the operation was handled by an adapter
+   */
+  removeLayer(layerId: string): boolean {
+    const adapter = this.getAdapterForLayer(layerId);
+    if (adapter && adapter.removeLayer) {
+      adapter.removeLayer(layerId);
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Subscribe to layer changes across all adapters.
    * @param callback Function called when layers are added or removed
    * @returns Unsubscribe function
