@@ -3039,7 +3039,7 @@ export class LayerControl implements IControl {
 
     // Separate MapLibre layers and custom layers
     const mapLibreLayers = userLayerIds.filter(id => mapLayerIds.includes(id));
-    const customLayers = userLayerIds.filter(id => 
+    const customLayers = userLayerIds.filter(id =>
       this.state.layerStates[id]?.isCustomLayer && !mapLayerIds.includes(id)
     );
 
@@ -3095,7 +3095,7 @@ export class LayerControl implements IControl {
       try {
         // Find the MapLibre layer to move before (2 positions above if exists)
         // If moving to top, use undefined as beforeId
-        const targetBeforeId = index >= 2 
+        const targetBeforeId = index >= 2
           ? this.findNextMapLibreLayer(layerIds, index - 2, -1)
           : undefined;
         this.map.moveLayer(layerId, targetBeforeId);
