@@ -206,8 +206,8 @@
 
 .layer-control-name {
   margin: 0;
-  flex: 1 1 auto;
-  min-width: 120px;
+  flex: 1 1 0;
+  min-width: 0;
   font-weight: 500;
   color: #333;
   overflow: hidden;
