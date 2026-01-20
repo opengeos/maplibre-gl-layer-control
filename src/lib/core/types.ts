@@ -227,4 +227,6 @@ export interface InternalControlState {
   customLayerNames: Map<string, string>;
   /** Drag state for layer reordering */
   drag: DragState;
+  /** Whether layers are being reordered (prevents checkForNewLayers from running) */
+  isReorderingLayers: boolean;
 }
