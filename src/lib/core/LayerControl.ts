@@ -2073,6 +2073,18 @@ export class LayerControl implements IControl {
       this.resetLayerStyle(layerId);
     });
 
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'style-editor-button style-editor-button-remove';
+    removeBtn.textContent = 'Remove';
+    removeBtn.title = 'Remove layer from map';
+    removeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (confirm('Are you sure you want to remove this layer?')) {
+        this.closeStyleEditor(layerId);
+        this.removeLayer(layerId);
+      }
+    });
+
     const closeActionBtn = document.createElement('button');
     closeActionBtn.className = 'style-editor-button style-editor-button-close';
     closeActionBtn.textContent = 'Close';
@@ -2082,6 +2094,7 @@ export class LayerControl implements IControl {
     });
 
     actions.appendChild(resetBtn);
+    actions.appendChild(removeBtn);
     actions.appendChild(closeActionBtn);
 
     editor.appendChild(header);

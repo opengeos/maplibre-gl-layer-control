@@ -686,6 +686,19 @@
   color: #ffffff !important;
 }
 
+.layer-control-style-editor .style-editor-button-remove {
+  background: #ef4444 !important;
+  color: #ffffff !important;
+  border-color: #dc2626 !important;
+  font-weight: 600;
+}
+
+.layer-control-style-editor .style-editor-button-remove:hover {
+  background: #dc2626 !important;
+  border-color: #b91c1c !important;
+  color: #ffffff !important;
+}
+
 /* ===== Background Legend Panel ===== */
 .layer-control-background-legend {
   display: block;
