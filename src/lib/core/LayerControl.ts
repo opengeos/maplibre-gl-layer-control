@@ -113,6 +113,7 @@ export class LayerControl implements IControl {
         placeholder: null,
         draggedElement: null,
       },
+      isReorderingLayers: false,
     };
 
     this.targetLayers = options.layers || Object.keys(this.state.layerStates);
@@ -2480,6 +2481,12 @@ export class LayerControl implements IControl {
    * Check for new layers and add them to the control, remove deleted layers
    */
   private checkForNewLayers(): void {
+    // Skip checking for new layers during reordering to prevent race conditions
+    // that could incorrectly delete custom layers
+    if (this.state.isReorderingLayers) {
+      return;
+    }
+
     try {
       const style = this.map.getStyle();
       if (!style || !style.layers) {
@@ -3393,6 +3400,10 @@ export class LayerControl implements IControl {
    * Apply UI order to map layers
    */
   private applyUIOrderToMap(): void {
+    // Set flag to prevent checkForNewLayers from running during reordering
+    // This prevents custom layers from being incorrectly deleted due to race conditions
+    this.state.isReorderingLayers = true;
+
     // Get layer items in current UI order
     const items = this.panel.querySelectorAll('.layer-control-item');
     const uiLayerIds: string[] = [];
@@ -3426,5 +3437,11 @@ export class LayerControl implements IControl {
 
     // Call callback
     this.onLayerReorder?.(uiLayerIds);
+
+    // Clear flag after styledata events have settled
+    // The 200ms delay accounts for the 100ms timeout in the styledata event handler
+    setTimeout(() => {
+      this.state.isReorderingLayers = false;
+    }, 200);
   }
 }
