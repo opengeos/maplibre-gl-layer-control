@@ -113,7 +113,7 @@ export class LayerControl implements IControl {
         placeholder: null,
         draggedElement: null,
       },
-      isReorderingLayers: false,
+      isStyleOperationInProgress: false,
     };
 
     this.targetLayers = options.layers || Object.keys(this.state.layerStates);
@@ -1334,6 +1334,9 @@ export class LayerControl implements IControl {
       return;
     }
 
+    // Set flag to prevent checkForNewLayers from running during visibility change
+    this.state.isStyleOperationInProgress = true;
+
     // Update local state
     if (this.state.layerStates[layerId]) {
       this.state.layerStates[layerId].visible = visible;
@@ -1341,11 +1344,20 @@ export class LayerControl implements IControl {
 
     // Try custom layer registry first
     if (this.customLayerRegistry?.setVisibility(layerId, visible)) {
+      // Clear flag after a delay for custom layers
+      setTimeout(() => {
+        this.state.isStyleOperationInProgress = false;
+      }, 200);
       return;
     }
 
     // Fallback to native MapLibre layer
     this.map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
+
+    // Clear flag after styledata events have settled
+    setTimeout(() => {
+      this.state.isStyleOperationInProgress = false;
+    }, 200);
   }
 
   /**
@@ -1358,6 +1370,9 @@ export class LayerControl implements IControl {
       return;
     }
 
+    // Set flag to prevent checkForNewLayers from running during opacity change
+    this.state.isStyleOperationInProgress = true;
+
     // Update local state
     if (this.state.layerStates[layerId]) {
       this.state.layerStates[layerId].opacity = opacity;
@@ -1365,6 +1380,10 @@ export class LayerControl implements IControl {
 
     // Try custom layer registry first
     if (this.customLayerRegistry?.setOpacity(layerId, opacity)) {
+      // Clear flag after a delay for custom layers
+      setTimeout(() => {
+        this.state.isStyleOperationInProgress = false;
+      }, 200);
       return;
     }
 
@@ -1373,6 +1392,11 @@ export class LayerControl implements IControl {
     if (layerType) {
       setLayerOpacity(this.map, layerId, layerType, opacity);
     }
+
+    // Clear flag after styledata events have settled
+    setTimeout(() => {
+      this.state.isStyleOperationInProgress = false;
+    }, 200);
   }
 
   /**
@@ -2481,9 +2505,9 @@ export class LayerControl implements IControl {
    * Check for new layers and add them to the control, remove deleted layers
    */
   private checkForNewLayers(): void {
-    // Skip checking for new layers during reordering to prevent race conditions
+    // Skip checking for new layers during style operations to prevent race conditions
     // that could incorrectly delete custom layers
-    if (this.state.isReorderingLayers) {
+    if (this.state.isStyleOperationInProgress) {
       return;
     }
 
@@ -3402,7 +3426,7 @@ export class LayerControl implements IControl {
   private applyUIOrderToMap(): void {
     // Set flag to prevent checkForNewLayers from running during reordering
     // This prevents custom layers from being incorrectly deleted due to race conditions
-    this.state.isReorderingLayers = true;
+    this.state.isStyleOperationInProgress = true;
 
     // Get layer items in current UI order
     const items = this.panel.querySelectorAll('.layer-control-item');
@@ -3441,7 +3465,7 @@ export class LayerControl implements IControl {
     // Clear flag after styledata events have settled
     // The 200ms delay accounts for the 100ms timeout in the styledata event handler
     setTimeout(() => {
-      this.state.isReorderingLayers = false;
+      this.state.isStyleOperationInProgress = false;
     }, 200);
   }
 }
