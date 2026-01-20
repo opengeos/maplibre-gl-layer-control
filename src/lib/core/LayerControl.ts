@@ -3025,6 +3025,7 @@ export class LayerControl implements IControl {
 
   /**
    * Get user layer IDs in current map order (top to bottom in UI = high z-index to low)
+   * Includes both MapLibre layers and custom layers managed by adapters.
    */
   private getUserLayerIdsInMapOrder(): string[] {
     const style = this.map.getStyle();
@@ -3036,10 +3037,42 @@ export class LayerControl implements IControl {
     // Filter to only user layers that are in our state
     const userLayerIds = Object.keys(this.state.layerStates).filter(id => id !== 'Background');
 
-    // Sort by map order (reversed: high index = top in UI)
-    return userLayerIds
-      .filter(id => mapLayerIds.includes(id))
+    // Separate MapLibre layers and custom layers
+    const mapLibreLayers = userLayerIds.filter(id => mapLayerIds.includes(id));
+    const customLayers = userLayerIds.filter(id =>
+      this.state.layerStates[id]?.isCustomLayer && !mapLayerIds.includes(id)
+    );
+
+    // Sort MapLibre layers by map order (reversed: high index = top in UI)
+    const sortedMapLibreLayers = mapLibreLayers
       .sort((a, b) => mapLayerIds.indexOf(b) - mapLayerIds.indexOf(a));
+
+    // Custom layers are placed at the top (rendered last/on top)
+    // Maintain their relative order from the state
+    return [...customLayers, ...sortedMapLibreLayers];
+  }
+
+  /**
+   * Check if a layer is a MapLibre layer (not a custom layer)
+   */
+  private isMapLibreLayer(layerId: string): boolean {
+    return this.map.getLayer(layerId) !== undefined;
+  }
+
+  /**
+   * Find the next MapLibre layer ID in a direction from a given index
+   * @param layerIds Array of layer IDs
+   * @param startIndex Index to start searching from
+   * @param direction 1 for forward (toward bottom), -1 for backward (toward top)
+   * @returns MapLibre layer ID or undefined if not found
+   */
+  private findNextMapLibreLayer(layerIds: string[], startIndex: number, direction: 1 | -1): string | undefined {
+    for (let i = startIndex; direction === 1 ? i < layerIds.length : i >= 0; i += direction) {
+      if (this.isMapLibreLayer(layerIds[i])) {
+        return layerIds[i];
+      }
+    }
+    return undefined;
   }
 
   /**
@@ -3050,26 +3083,46 @@ export class LayerControl implements IControl {
     const index = layerIds.indexOf(layerId);
     if (index <= 0) return; // Already at top or not found
 
-    // UI: [0]=top, [1], [2], ... [n]=bottom
-    // Map array: bottom to top (low index = low z-index)
-    // moveLayer(id, beforeId) moves id to render BELOW beforeId
+    // Check if this is a custom layer
+    const isCustom = this.state.layerStates[layerId]?.isCustomLayer;
 
-    try {
-      if (index === 1) {
-        // Moving to the top position - use moveLayer without beforeId
-        this.map.moveLayer(layerId);
-      } else {
-        // Move this layer to be just below the layer that's 2 positions above
-        // This places it between layerIds[index-2] and layerIds[index-1]
-        const targetBeforeId = layerIds[index - 2];
+    if (!isCustom && this.isMapLibreLayer(layerId)) {
+      // For MapLibre layers, we need to move them in the map
+      // UI: [0]=top, [1], [2], ... [n]=bottom
+      // Map array: bottom to top (low index = low z-index)
+      // moveLayer(id, beforeId) moves id to render BELOW beforeId
+
+      try {
+        // Find the MapLibre layer to move before (2 positions above if exists)
+        // If moving to top, use undefined as beforeId
+        const targetBeforeId = index >= 2
+          ? this.findNextMapLibreLayer(layerIds, index - 2, -1)
+          : undefined;
         this.map.moveLayer(layerId, targetBeforeId);
+      } catch (e) {
+        // Ignore errors
       }
-    } catch (e) {
-      // Ignore errors for custom layers
     }
 
+    // For custom layers, just update the internal order
+    // Swap positions in the state
+    const newLayerStates: { [key: string]: LayerState } = {};
+    const orderedIds = [...layerIds];
+    [orderedIds[index], orderedIds[index - 1]] = [orderedIds[index - 1], orderedIds[index]];
+
+    // Add Background first if it exists
+    if (this.state.layerStates['Background']) {
+      newLayerStates['Background'] = this.state.layerStates['Background'];
+    }
+    orderedIds.forEach(id => {
+      if (this.state.layerStates[id]) {
+        newLayerStates[id] = this.state.layerStates[id];
+      }
+    });
+    this.state.layerStates = newLayerStates;
+
     // Rebuild UI
-    this.rebuildLayerItems();
+    this.buildLayerItems();
     this.onLayerReorder?.(this.getUserLayerIdsInMapOrder());
   }
 
@@ -3077,15 +3130,41 @@ export class LayerControl implements IControl {
    * Move a layer to the top (highest rendering order)
    */
   private moveLayerToTop(layerId: string): void {
-    // Move in MapLibre - no beforeId means move to top (highest z-index)
-    try {
-      this.map.moveLayer(layerId);
-    } catch (e) {
-      // Ignore errors for custom layers
+    const layerIds = this.getUserLayerIdsInMapOrder();
+    const index = layerIds.indexOf(layerId);
+    if (index <= 0) return; // Already at top or not found
+
+    // Check if this is a custom layer
+    const isCustom = this.state.layerStates[layerId]?.isCustomLayer;
+
+    if (!isCustom && this.isMapLibreLayer(layerId)) {
+      // Move in MapLibre - no beforeId means move to top (highest z-index)
+      try {
+        this.map.moveLayer(layerId);
+      } catch (e) {
+        // Ignore errors
+      }
     }
 
+    // Update internal order - move to front
+    const newLayerStates: { [key: string]: LayerState } = {};
+    const orderedIds = [...layerIds];
+    orderedIds.splice(index, 1);
+    orderedIds.unshift(layerId);
+
+    // Add Background first if it exists
+    if (this.state.layerStates['Background']) {
+      newLayerStates['Background'] = this.state.layerStates['Background'];
+    }
+    orderedIds.forEach(id => {
+      if (this.state.layerStates[id]) {
+        newLayerStates[id] = this.state.layerStates[id];
+      }
+    });
+    this.state.layerStates = newLayerStates;
+
     // Rebuild UI
-    this.rebuildLayerItems();
+    this.buildLayerItems();
     this.onLayerReorder?.(this.getUserLayerIdsInMapOrder());
   }
 
@@ -3097,19 +3176,43 @@ export class LayerControl implements IControl {
     const index = layerIds.indexOf(layerId);
     if (index < 0 || index >= layerIds.length - 1) return; // Already at bottom or not found
 
-    // The layer below in UI is at index + 1, which has lower z-index in map
-    // To move our layer below it, we call moveLayer(layerId, belowLayerId)
-    // This puts layerId just below belowLayerId in rendering order
-    const belowLayerId = layerIds[index + 1];
+    // Check if this is a custom layer
+    const isCustom = this.state.layerStates[layerId]?.isCustomLayer;
 
-    try {
-      this.map.moveLayer(layerId, belowLayerId);
-    } catch (e) {
-      // Ignore errors for custom layers
+    if (!isCustom && this.isMapLibreLayer(layerId)) {
+      // The layer below in UI is at index + 1, which has lower z-index in map
+      // To move our layer below it, we call moveLayer(layerId, belowLayerId)
+      // This puts layerId just below belowLayerId in rendering order
+      // Find the next MapLibre layer below
+      const belowLayerId = this.findNextMapLibreLayer(layerIds, index + 1, 1);
+
+      if (belowLayerId) {
+        try {
+          this.map.moveLayer(layerId, belowLayerId);
+        } catch (e) {
+          // Ignore errors
+        }
+      }
     }
 
+    // Update internal order - swap positions
+    const newLayerStates: { [key: string]: LayerState } = {};
+    const orderedIds = [...layerIds];
+    [orderedIds[index], orderedIds[index + 1]] = [orderedIds[index + 1], orderedIds[index]];
+
+    // Add Background first if it exists
+    if (this.state.layerStates['Background']) {
+      newLayerStates['Background'] = this.state.layerStates['Background'];
+    }
+    orderedIds.forEach(id => {
+      if (this.state.layerStates[id]) {
+        newLayerStates[id] = this.state.layerStates[id];
+      }
+    });
+    this.state.layerStates = newLayerStates;
+
     // Rebuild UI
-    this.rebuildLayerItems();
+    this.buildLayerItems();
     this.onLayerReorder?.(this.getUserLayerIdsInMapOrder());
   }
 
@@ -3123,18 +3226,43 @@ export class LayerControl implements IControl {
     const index = layerIds.indexOf(layerId);
     if (index < 0 || index === layerIds.length - 1) return; // Not found or already at bottom
 
-    // The bottom layer in UI has the lowest z-index among user layers
-    const bottomLayerId = layerIds[layerIds.length - 1];
+    // Check if this is a custom layer
+    const isCustom = this.state.layerStates[layerId]?.isCustomLayer;
 
-    try {
-      // Move this layer to be just below the current bottom layer
-      this.map.moveLayer(layerId, bottomLayerId);
-    } catch (e) {
-      // Ignore errors for custom layers
+    if (!isCustom && this.isMapLibreLayer(layerId)) {
+      // The bottom layer in UI has the lowest z-index among user layers
+      // Find the bottom-most MapLibre layer
+      const bottomLayerId = this.findNextMapLibreLayer(layerIds, layerIds.length - 1, -1);
+
+      if (bottomLayerId && bottomLayerId !== layerId) {
+        try {
+          // Move this layer to be just below the current bottom layer
+          this.map.moveLayer(layerId, bottomLayerId);
+        } catch (e) {
+          // Ignore errors
+        }
+      }
     }
 
+    // Update internal order - move to end
+    const newLayerStates: { [key: string]: LayerState } = {};
+    const orderedIds = [...layerIds];
+    orderedIds.splice(index, 1);
+    orderedIds.push(layerId);
+
+    // Add Background first if it exists
+    if (this.state.layerStates['Background']) {
+      newLayerStates['Background'] = this.state.layerStates['Background'];
+    }
+    orderedIds.forEach(id => {
+      if (this.state.layerStates[id]) {
+        newLayerStates[id] = this.state.layerStates[id];
+      }
+    });
+    this.state.layerStates = newLayerStates;
+
     // Rebuild UI
-    this.rebuildLayerItems();
+    this.buildLayerItems();
     this.onLayerReorder?.(this.getUserLayerIdsInMapOrder());
   }
 
@@ -3185,34 +3313,6 @@ export class LayerControl implements IControl {
 
     // Call callback
     this.onLayerRemove?.(layerId);
-  }
-
-  /**
-   * Rebuild layer items to reflect current order
-   */
-  private rebuildLayerItems(): void {
-    // Get user layer IDs in current map order
-    const userLayerIds = this.getUserLayerIdsInMapOrder();
-
-    // Update state order
-    const newLayerStates: { [key: string]: LayerState } = {};
-
-    // Add Background first if it exists
-    if (this.state.layerStates['Background']) {
-      newLayerStates['Background'] = this.state.layerStates['Background'];
-    }
-
-    // Add user layers in sorted order
-    userLayerIds.forEach((id: string) => {
-      if (this.state.layerStates[id]) {
-        newLayerStates[id] = this.state.layerStates[id];
-      }
-    });
-
-    this.state.layerStates = newLayerStates;
-
-    // Rebuild UI
-    this.buildLayerItems();
   }
 
   // ===== Drag and Drop Methods =====
@@ -3443,19 +3543,33 @@ export class LayerControl implements IControl {
     // to maintain the correct stacking
     const reversedIds = [...uiLayerIds].reverse();
 
+    // Build a set of MapLibre layer IDs for quick lookup
+    const style = this.map.getStyle();
+    const mapLibreLayerIds = new Set(style?.layers?.map(l => l.id) || []);
+
     // Move each layer to its correct position
     for (let i = 0; i < reversedIds.length; i++) {
       const layerId = reversedIds[i];
-      const beforeId = i > 0 ? reversedIds[i - 1] : undefined;
+
+      // Check if layer exists in MapLibre (skip custom layers)
+      if (!mapLibreLayerIds.has(layerId)) {
+        continue;
+      }
+
+      // Find the next MapLibre layer to use as beforeId
+      // Skip any custom layers that might be between this layer and the next
+      let beforeId: string | undefined = undefined;
+      for (let j = i - 1; j >= 0; j--) {
+        if (mapLibreLayerIds.has(reversedIds[j])) {
+          beforeId = reversedIds[j];
+          break;
+        }
+      }
 
       try {
-        // Check if layer exists in map
-        const layer = this.map.getLayer(layerId);
-        if (layer) {
-          this.map.moveLayer(layerId, beforeId);
-        }
+        this.map.moveLayer(layerId, beforeId);
       } catch (e) {
-        // Ignore errors for custom layers
+        // Ignore errors
       }
     }
 
