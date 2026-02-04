@@ -51,6 +51,7 @@ export class LayerControl implements IControl {
   private excludeLayerPatterns: RegExp[];
   private customLayerRegistry: CustomLayerRegistry | null = null;
   private customLayerUnsubscribe: (() => void) | null = null;
+  private removedCustomLayerIds: Set<string> = new Set();
   private basemapStyleUrl: string | null = null;
   private basemapLayerIds: Set<string> | null = null;
   private widthSliderEl: HTMLElement | null = null;
@@ -1092,7 +1093,11 @@ export class LayerControl implements IControl {
 
     // Subscribe to custom layer registry changes
     if (this.customLayerRegistry) {
-      this.customLayerUnsubscribe = this.customLayerRegistry.onChange(() => {
+      this.customLayerUnsubscribe = this.customLayerRegistry.onChange((event, layerId) => {
+        // If a previously removed layer is re-added, allow it to appear again
+        if (event === 'add' && layerId) {
+          this.removedCustomLayerIds.delete(layerId);
+        }
         setTimeout(() => this.checkForNewLayers(), 100);
       });
     }
@@ -1988,9 +1993,21 @@ export class LayerControl implements IControl {
 
     content.appendChild(infoText);
 
-    // Close button
+    // Action buttons
     const actions = document.createElement('div');
     actions.className = 'style-editor-actions';
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'style-editor-button style-editor-button-remove';
+    removeBtn.textContent = 'Remove';
+    removeBtn.title = 'Remove layer from map';
+    removeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (confirm('Are you sure you want to remove this layer?')) {
+        this.closeStyleEditor(layerId);
+        this.removeLayer(layerId);
+      }
+    });
 
     const closeActionBtn = document.createElement('button');
     closeActionBtn.className = 'style-editor-button style-editor-button-close';
@@ -2000,6 +2017,7 @@ export class LayerControl implements IControl {
       this.closeStyleEditor(layerId);
     });
 
+    actions.appendChild(removeBtn);
     actions.appendChild(closeActionBtn);
 
     editor.appendChild(header);
@@ -2665,9 +2683,9 @@ export class LayerControl implements IControl {
       if (this.customLayerRegistry) {
         const customLayerIds = this.customLayerRegistry.getAllLayerIds();
 
-        // Find new custom layers
+        // Find new custom layers (skip ones explicitly removed by the user)
         customLayerIds.forEach(layerId => {
-          if (!this.state.layerStates[layerId]) {
+          if (!this.state.layerStates[layerId] && !this.removedCustomLayerIds.has(layerId)) {
             const customState = this.customLayerRegistry!.getLayerState(layerId);
             if (customState) {
               this.state.layerStates[layerId] = {
@@ -2718,7 +2736,10 @@ export class LayerControl implements IControl {
     if (!this.customLayerRegistry) {
       this.customLayerRegistry = new CustomLayerRegistry();
       // Subscribe to registry changes
-      this.customLayerUnsubscribe = this.customLayerRegistry.onChange(() => {
+      this.customLayerUnsubscribe = this.customLayerRegistry.onChange((event, layerId) => {
+        if (event === 'add' && layerId) {
+          this.removedCustomLayerIds.delete(layerId);
+        }
         this.checkForNewLayers();
       });
     }
@@ -3285,33 +3306,40 @@ export class LayerControl implements IControl {
   private removeLayer(layerId: string): void {
     const layerState = this.state.layerStates[layerId];
 
-    // Check if it's a custom layer
+    // Handle custom layer removal
     if (layerState?.isCustomLayer && this.customLayerRegistry) {
-      this.customLayerRegistry.removeLayer(layerId);
-    } else {
-      // Remove native MapLibre layer
-      try {
-        const layer = this.map.getLayer(layerId);
-        if (layer) {
-          const sourceId = (layer as any).source;
-          this.map.removeLayer(layerId);
+      // Track this ID so checkForNewLayers() won't re-add it
+      this.removedCustomLayerIds.add(layerId);
 
-          // Check if source is still used by other layers
-          if (sourceId) {
-            const style = this.map.getStyle();
-            const sourceStillUsed = style?.layers?.some(l => (l as any).source === sourceId);
-            if (!sourceStillUsed) {
-              try {
-                this.map.removeSource(sourceId);
-              } catch (e) {
-                // Source might not exist or be in use
-              }
+      // Hide the layer immediately as a visual fallback
+      this.customLayerRegistry.setVisibility(layerId, false);
+
+      // Let the adapter perform its own cleanup
+      this.customLayerRegistry.removeLayer(layerId);
+    }
+
+    // Remove native MapLibre layer from the map
+    try {
+      const layer = this.map.getLayer(layerId);
+      if (layer) {
+        const sourceId = (layer as any).source;
+        this.map.removeLayer(layerId);
+
+        // Check if source is still used by other layers
+        if (sourceId) {
+          const style = this.map.getStyle();
+          const sourceStillUsed = style?.layers?.some(l => (l as any).source === sourceId);
+          if (!sourceStillUsed) {
+            try {
+              this.map.removeSource(sourceId);
+            } catch (e) {
+              // Source might not exist or be in use
             }
           }
         }
-      } catch (error) {
-        console.warn(`Failed to remove layer ${layerId}:`, error);
       }
+    } catch (error) {
+      console.warn(`Failed to remove layer ${layerId}:`, error);
     }
 
     // Remove from state
