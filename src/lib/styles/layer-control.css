@@ -629,6 +629,19 @@
   font-size: 12px;
 }
 
+.style-editor-section-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: #555;
+  margin: 8px 0 4px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid #e0e6ed;
+}
+
+.style-editor-section-header:first-child {
+  margin-top: 0;
+}
+
 .style-editor-actions {
   display: flex;
   gap: 8px;
