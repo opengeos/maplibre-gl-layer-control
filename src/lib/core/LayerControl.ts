@@ -52,6 +52,7 @@ export class LayerControl implements IControl {
   private customLayerRegistry: CustomLayerRegistry | null = null;
   private customLayerUnsubscribe: (() => void) | null = null;
   private removedCustomLayerIds: Set<string> = new Set();
+  private nativeLayerGroups: Map<string, string[]> = new Map();
   private basemapStyleUrl: string | null = null;
   private basemapLayerIds: Set<string> | null = null;
   private widthSliderEl: HTMLElement | null = null;
@@ -591,12 +592,17 @@ export class LayerControl implements IControl {
    */
   private isDrawnLayer(layerId: string): boolean {
     const drawnLayerPatterns = [
+      // Drawing libraries
       /^gm[-_\s]/i,                  // Geoman (gm-main-*, gm_*, Gm Temporary...)
       /^gl-draw[-_]/i,               // Mapbox GL Draw
       /^mapbox-gl-draw[-_]/i,        // Mapbox GL Draw alternative
       /^terra-draw[-_]/i,            // Terra Draw
       /^maplibre-gl-draw[-_]/i,      // MapLibre GL Draw
       /^draw[-_]layer/i,             // Generic draw layers
+      // maplibre-gl-components internal layers
+      /^measure-/i,                  // MeasureControl (measure-{id}-fill, measure-{id}-line)
+      /^pmtiles-source-/i,           // PMTilesLayerControl (managed via adapter)
+      /^stac-search-footprints/i,    // StacSearchControl footprint layers
     ];
 
     return drawnLayerPatterns.some(pattern => pattern.test(layerId));
@@ -1921,7 +1927,34 @@ export class LayerControl implements IControl {
     // Check if this is a custom layer
     const layerState = this.state.layerStates[layerId];
     if (layerState?.isCustomLayer) {
-      // Show info message for custom layers
+      // Check if the adapter provides native MapLibre layer IDs for style editing
+      const nativeLayerIds = this.customLayerRegistry?.getNativeLayerIds(layerId);
+      if (nativeLayerIds && nativeLayerIds.length > 0) {
+        // Cache original styles for all native sublayers
+        for (const nativeId of nativeLayerIds) {
+          if (!this.state.originalStyles.has(nativeId)) {
+            const nativeLayer = this.map.getLayer(nativeId);
+            if (nativeLayer) {
+              cacheOriginalLayerStyle(this.map, nativeId, this.state.originalStyles);
+            }
+          }
+        }
+
+        // Create combined style editor for native sublayers
+        const editor = this.createNativeSubLayerStyleEditor(layerId, nativeLayerIds);
+        if (editor) {
+          itemEl.appendChild(editor);
+          this.styleEditors.set(layerId, editor);
+          this.state.activeStyleEditor = layerId;
+
+          setTimeout(() => {
+            editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }, 50);
+          return;
+        }
+      }
+
+      // Fallback: show info message for custom layers without native sublayers
       const editor = this.createCustomLayerInfoPanel(layerId);
       itemEl.appendChild(editor);
       this.styleEditors.set(layerId, editor);
@@ -2028,6 +2061,147 @@ export class LayerControl implements IControl {
   }
 
   /**
+   * Create a combined style editor for custom layers with native MapLibre sublayers.
+   * Groups controls by sublayer type (fill, line, circle, etc.).
+   */
+  private createNativeSubLayerStyleEditor(
+    layerId: string,
+    nativeLayerIds: string[]
+  ): HTMLDivElement | null {
+    // Group native layers by type
+    const layersByType = new Map<string, string[]>();
+    for (const nativeId of nativeLayerIds) {
+      const layer = this.map.getLayer(nativeId);
+      if (layer) {
+        const type = layer.type;
+        if (!layersByType.has(type)) {
+          layersByType.set(type, []);
+        }
+        layersByType.get(type)!.push(nativeId);
+      }
+    }
+
+    if (layersByType.size === 0) return null;
+
+    const editor = document.createElement('div');
+    editor.className = 'layer-control-style-editor';
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'style-editor-header';
+
+    const title = document.createElement('span');
+    title.className = 'style-editor-title';
+    title.textContent = 'Edit Style';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'style-editor-close';
+    closeBtn.innerHTML = '&times;';
+    closeBtn.title = 'Close';
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.closeStyleEditor(layerId);
+    });
+
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+    editor.appendChild(header);
+
+    // Controls container
+    const controls = document.createElement('div');
+    controls.className = 'style-editor-controls';
+
+    // Type display names
+    const typeLabels: Record<string, string> = {
+      fill: 'Fill',
+      line: 'Line',
+      circle: 'Circle',
+      symbol: 'Symbol',
+      raster: 'Raster',
+    };
+
+    // Add controls for each layer type, using the first native layer of that type
+    for (const [type, ids] of layersByType) {
+      // Add section header if there are multiple types
+      if (layersByType.size > 1) {
+        const sectionHeader = document.createElement('div');
+        sectionHeader.className = 'style-editor-section-header';
+        sectionHeader.textContent = typeLabels[type] || type;
+        controls.appendChild(sectionHeader);
+      }
+
+      // Use the first layer of this type for controls
+      // Changes will be applied to all layers of the same type
+      const primaryId = ids[0];
+      this.addStyleControlsForNativeGroup(controls, ids, primaryId, type);
+    }
+
+    // Action buttons
+    const actions = document.createElement('div');
+    actions.className = 'style-editor-actions';
+
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'style-editor-button style-editor-button-reset';
+    resetBtn.textContent = 'Reset';
+    resetBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Reset all native sublayers
+      for (const nativeId of nativeLayerIds) {
+        restoreOriginalStyle(this.map, nativeId, this.state.originalStyles);
+      }
+      // Refresh the editor
+      this.closeStyleEditor(layerId);
+      this.openStyleEditor(layerId);
+    });
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'style-editor-button style-editor-button-remove';
+    removeBtn.textContent = 'Remove';
+    removeBtn.title = 'Remove layer from map';
+    removeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (confirm('Are you sure you want to remove this layer?')) {
+        this.closeStyleEditor(layerId);
+        this.removeLayer(layerId);
+      }
+    });
+
+    const closeActionBtn = document.createElement('button');
+    closeActionBtn.className = 'style-editor-button style-editor-button-close';
+    closeActionBtn.textContent = 'Close';
+    closeActionBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.closeStyleEditor(layerId);
+    });
+
+    actions.appendChild(resetBtn);
+    actions.appendChild(removeBtn);
+    actions.appendChild(closeActionBtn);
+
+    editor.appendChild(controls);
+    editor.appendChild(actions);
+
+    return editor;
+  }
+
+  /**
+   * Add style controls for a group of native layers of the same type.
+   * Changes to any control are applied to all layers in the group.
+   */
+  private addStyleControlsForNativeGroup(
+    container: HTMLElement,
+    layerIds: string[],
+    primaryLayerId: string,
+    layerType: string
+  ): void {
+    // Register the group mapping so createColorControl/createSliderControl
+    // will apply changes to all layers in the group
+    this.nativeLayerGroups.set(primaryLayerId, layerIds);
+
+    this.addStyleControlsForLayerType(container, primaryLayerId, layerType);
+  }
+
+  /**
    * Close style editor for a layer
    */
   private closeStyleEditor(layerId: string): void {
@@ -2036,6 +2210,9 @@ export class LayerControl implements IControl {
       editor.remove();
       this.styleEditors.delete(layerId);
     }
+
+    // Clean up any native layer group mappings
+    this.nativeLayerGroups.clear();
 
     if (this.state.activeStyleEditor === layerId) {
       this.state.activeStyleEditor = null;
@@ -2350,7 +2527,10 @@ export class LayerControl implements IControl {
     colorInput.addEventListener('input', () => {
       const color = colorInput.value;
       hexDisplay.value = color;
-      this.map.setPaintProperty(layerId, property, color);
+      const targetIds = this.nativeLayerGroups.get(layerId) || [layerId];
+      for (const id of targetIds) {
+        this.map.setPaintProperty(id, property, color);
+      }
     });
 
     inputWrapper.appendChild(colorInput);
@@ -2401,7 +2581,10 @@ export class LayerControl implements IControl {
     slider.addEventListener('input', () => {
       const value = parseFloat(slider.value);
       valueDisplay.textContent = formatNumericValue(value, step);
-      this.map.setPaintProperty(layerId, property, value);
+      const targetIds = this.nativeLayerGroups.get(layerId) || [layerId];
+      for (const id of targetIds) {
+        this.map.setPaintProperty(id, property, value);
+      }
     });
 
     inputWrapper.appendChild(slider);
@@ -3304,6 +3487,10 @@ export class LayerControl implements IControl {
    * Remove a layer from the map
    */
   private removeLayer(layerId: string): void {
+    // Prevent checkForNewLayers() from running during removal
+    // (removing a layer triggers styledata events that could cause race conditions)
+    this.state.isStyleOperationInProgress = true;
+
     const layerState = this.state.layerStates[layerId];
 
     // Handle custom layer removal
@@ -3354,6 +3541,11 @@ export class LayerControl implements IControl {
 
     // Call callback
     this.onLayerRemove?.(layerId);
+
+    // Clear flag after style events have settled
+    setTimeout(() => {
+      this.state.isStyleOperationInProgress = false;
+    }, 200);
   }
 
   // ===== Drag and Drop Methods =====

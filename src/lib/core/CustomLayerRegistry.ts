@@ -146,6 +146,19 @@ export class CustomLayerRegistry {
   }
 
   /**
+   * Get native MapLibre layer IDs for a custom layer.
+   * @param layerId The custom layer ID
+   * @returns Array of native layer IDs, or null if not available
+   */
+  getNativeLayerIds(layerId: string): string[] | null {
+    const adapter = this.getAdapterForLayer(layerId);
+    if (adapter && adapter.getNativeLayerIds) {
+      return adapter.getNativeLayerIds(layerId);
+    }
+    return null;
+  }
+
+  /**
    * Remove a custom layer through its adapter.
    * @param layerId The layer ID to remove
    * @returns true if the operation was handled by an adapter
