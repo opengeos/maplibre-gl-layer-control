@@ -2036,10 +2036,10 @@ export class LayerControl implements IControl {
     removeBtn.title = 'Remove layer from map';
     removeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (confirm('Are you sure you want to remove this layer?')) {
+      this.showRemoveConfirmation(editor, () => {
         this.closeStyleEditor(layerId);
         this.removeLayer(layerId);
-      }
+      });
     });
 
     const closeActionBtn = document.createElement('button');
@@ -2160,10 +2160,10 @@ export class LayerControl implements IControl {
     removeBtn.title = 'Remove layer from map';
     removeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (confirm('Are you sure you want to remove this layer?')) {
+      this.showRemoveConfirmation(editor, () => {
         this.closeStyleEditor(layerId);
         this.removeLayer(layerId);
-      }
+      });
     });
 
     const closeActionBtn = document.createElement('button');
@@ -2274,10 +2274,10 @@ export class LayerControl implements IControl {
     removeBtn.title = 'Remove layer from map';
     removeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (confirm('Are you sure you want to remove this layer?')) {
+      this.showRemoveConfirmation(editor, () => {
         this.closeStyleEditor(layerId);
         this.removeLayer(layerId);
-      }
+      });
     });
 
     const closeActionBtn = document.createElement('button');
@@ -3481,6 +3481,66 @@ export class LayerControl implements IControl {
     // Rebuild UI
     this.buildLayerItems();
     this.onLayerReorder?.(this.getUserLayerIdsInMapOrder());
+  }
+
+  /**
+   * Show inline remove confirmation instead of browser confirm() dialog.
+   * Works in Jupyter notebooks where native dialogs may not appear.
+   */
+  private showRemoveConfirmation(
+    container: HTMLElement,
+    onConfirm: () => void
+  ): void {
+    // Remove any existing confirmation in this container
+    const existing = container.querySelector('.layer-control-remove-confirm');
+    if (existing) {
+      existing.remove();
+    }
+
+    const confirmEl = document.createElement('div');
+    confirmEl.className = 'layer-control-remove-confirm';
+
+    const message = document.createElement('div');
+    message.className = 'layer-control-remove-confirm-message';
+    message.innerHTML = `
+      <svg class="layer-control-remove-confirm-icon" viewBox="0 0 20 20" fill="currentColor">
+        <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"/>
+      </svg>
+      <span>Remove this layer?</span>
+    `;
+
+    const buttons = document.createElement('div');
+    buttons.className = 'layer-control-remove-confirm-buttons';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'layer-control-remove-confirm-btn layer-control-remove-confirm-btn-cancel';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      confirmEl.remove();
+    });
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.className = 'layer-control-remove-confirm-btn layer-control-remove-confirm-btn-confirm';
+    confirmBtn.textContent = 'Remove';
+    confirmBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      confirmEl.remove();
+      onConfirm();
+    });
+
+    buttons.appendChild(cancelBtn);
+    buttons.appendChild(confirmBtn);
+
+    confirmEl.appendChild(message);
+    confirmEl.appendChild(buttons);
+
+    container.appendChild(confirmEl);
+
+    // Scroll the confirmation into view
+    requestAnimationFrame(() => {
+      confirmEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
   }
 
   /**

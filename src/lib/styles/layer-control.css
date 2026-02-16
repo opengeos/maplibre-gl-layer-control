@@ -1086,3 +1086,78 @@
 .layer-control-panel.dragging-active * {
   cursor: grabbing !important;
 }
+
+/* ===== Inline Remove Confirmation ===== */
+.layer-control-remove-confirm {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  padding: 12px;
+  margin-top: 8px;
+  animation: confirmSlideIn 0.15s ease-out;
+}
+
+@keyframes confirmSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.layer-control-remove-confirm-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: #991b1b;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.layer-control-remove-confirm-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.layer-control-remove-confirm-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.layer-control-remove-confirm-btn {
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid;
+  transition: all 0.15s ease;
+}
+
+.layer-control-remove-confirm-btn-cancel {
+  background: #ffffff;
+  color: #374151;
+  border-color: #d1d5db;
+}
+
+.layer-control-remove-confirm-btn-cancel:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+.layer-control-remove-confirm-btn-confirm {
+  background: #dc2626;
+  color: #ffffff;
+  border-color: #b91c1c;
+}
+
+.layer-control-remove-confirm-btn-confirm:hover {
+  background: #b91c1c;
+  border-color: #991b1b;
+}
