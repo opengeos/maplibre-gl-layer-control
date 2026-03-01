@@ -8,6 +8,8 @@ export type {
   LayerControlOptions,
   LayerState,
   LayerStates,
+  PartialLayerState,
+  PartialLayerStates,
   StyleableLayerType,
   PaintProperty,
   StyleControlConfig,
