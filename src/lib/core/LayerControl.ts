@@ -2,6 +2,7 @@ import type { IControl, Map as MapLibreMap, LayerSpecification } from 'maplibre-
 import type {
   LayerControlOptions,
   LayerState,
+  PartialLayerStates,
   OriginalStyle,
   InternalControlState,
   CustomLayerAdapter,
@@ -39,6 +40,7 @@ export class LayerControl implements IControl {
   private styleEditors: Map<string, HTMLElement>;
   private initialSourceIds: Set<string> | null = null;
   private initialLayerIds: Set<string> | null = null;
+  private initialLayerStates: PartialLayerStates;
 
   // Panel width management
   private minPanelWidth: number;
@@ -89,11 +91,13 @@ export class LayerControl implements IControl {
     this.onLayerReorder = options.onLayerReorder;
     this.onLayerRemove = options.onLayerRemove;
 
+    this.initialLayerStates = options.layerStates || {};
+
     this.state = {
       collapsed: options.collapsed !== false,
       panelWidth: options.panelWidth || 350,
       activeStyleEditor: null,
-      layerStates: options.layerStates || {},
+      layerStates: {},
       originalStyles: new Map<string, OriginalStyle>(),
       userInteractingWithSlider: false,
       backgroundLegendOpen: false,
@@ -118,7 +122,7 @@ export class LayerControl implements IControl {
       isStyleOperationInProgress: false,
     };
 
-    this.targetLayers = options.layers || Object.keys(this.state.layerStates);
+    this.targetLayers = options.layers || Object.keys(this.initialLayerStates);
     this.styleEditors = new Map<string, HTMLElement>();
 
     // Initialize custom layer registry if adapters are provided
@@ -368,11 +372,11 @@ export class LayerControl implements IControl {
         const opacity = getLayerOpacity(this.map, layerId, layerType);
         const friendlyName = this.generateFriendlyName(layerId);
 
-        this.state.layerStates[layerId] = {
+        this.state.layerStates[layerId] = this.mergeWithUserState(layerId, {
           visible: isVisible,
           opacity: opacity,
-          name: friendlyName
-        };
+          name: friendlyName,
+        });
       });
     } else {
       // Specific layers requested - separate into user layers + Background
@@ -407,22 +411,17 @@ export class LayerControl implements IControl {
         const layer = this.map.getLayer(layerId);
         if (!layer) return;
 
-        // Get visibility
         const visibility = this.map.getLayoutProperty(layerId, 'visibility');
         const isVisible = visibility !== 'none';
-
-        // Get opacity
         const layerType = layer.type;
         const opacity = getLayerOpacity(this.map, layerId, layerType);
-
-        // Generate friendly name from layer ID
         const friendlyName = this.generateFriendlyName(layerId);
 
-        this.state.layerStates[layerId] = {
+        this.state.layerStates[layerId] = this.mergeWithUserState(layerId, {
           visible: isVisible,
           opacity: opacity,
-          name: friendlyName
-        };
+          name: friendlyName,
+        });
       });
     }
 
@@ -583,6 +582,23 @@ export class LayerControl implements IControl {
     name = name.replace(/\b\w/g, char => char.toUpperCase());
 
     return name || layerId; // Fallback to original if empty
+  }
+
+  /**
+   * Merge auto-detected layer state with user-provided initial state.
+   * User-provided values take precedence over detected values.
+   */
+  private mergeWithUserState(layerId: string, detected: LayerState): LayerState {
+    const userState = this.initialLayerStates[layerId];
+    if (!userState) return detected;
+
+    return {
+      visible: userState.visible ?? detected.visible,
+      opacity: userState.opacity ?? detected.opacity,
+      name: userState.name ?? detected.name,
+      ...(userState.isCustomLayer !== undefined && { isCustomLayer: userState.isCustomLayer }),
+      ...(userState.customLayerType !== undefined && { customLayerType: userState.customLayerType }),
+    };
   }
 
   /**

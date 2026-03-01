@@ -24,6 +24,19 @@ export interface LayerStates {
 }
 
 /**
+ * Partial layer state for user-provided initial configuration.
+ * Users can specify only the properties they want to override (e.g., just `name`).
+ */
+export type PartialLayerState = Partial<LayerState>;
+
+/**
+ * Collection of partial layer states keyed by layer ID (for options input)
+ */
+export interface PartialLayerStates {
+  [layerId: string]: PartialLayerState;
+}
+
+/**
  * Adapter interface for custom (non-MapLibre) layers.
  * Implement this interface to integrate custom layer types (e.g., deck.gl layers)
  * with the layer control.
@@ -90,8 +103,8 @@ export interface OriginalStyle {
 export interface LayerControlOptions {
   /** Whether the control starts collapsed (default: true) */
   collapsed?: boolean;
-  /** Initial layer states (keyed by layer ID) */
-  layerStates?: LayerStates;
+  /** Initial layer states (keyed by layer ID). Partial values are accepted; unspecified fields will be auto-detected from the map. */
+  layerStates?: PartialLayerStates;
   /** Array of layer IDs to control (if not specified, controls all layers) */
   layers?: string[];
   /** Initial panel width in pixels (default: 320) */
