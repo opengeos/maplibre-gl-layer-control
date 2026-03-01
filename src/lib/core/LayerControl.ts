@@ -368,10 +368,14 @@ export class LayerControl implements IControl {
         const opacity = getLayerOpacity(this.map, layerId, layerType);
         const friendlyName = this.generateFriendlyName(layerId);
 
+        // Merge with user-provided layerStates if present
+        const existing = this.state.layerStates[layerId];
         this.state.layerStates[layerId] = {
-          visible: isVisible,
-          opacity: opacity,
-          name: friendlyName
+          visible: existing?.visible ?? isVisible,
+          opacity: existing?.opacity ?? opacity,
+          name: existing?.name ?? friendlyName,
+          ...( existing?.isCustomLayer !== undefined ? { isCustomLayer: existing.isCustomLayer } : {}),
+          ...( existing?.customLayerType !== undefined ? { customLayerType: existing.customLayerType } : {}),
         };
       });
     } else {
@@ -418,10 +422,14 @@ export class LayerControl implements IControl {
         // Generate friendly name from layer ID
         const friendlyName = this.generateFriendlyName(layerId);
 
+        // Merge with user-provided layerStates if present
+        const existing = this.state.layerStates[layerId];
         this.state.layerStates[layerId] = {
-          visible: isVisible,
-          opacity: opacity,
-          name: friendlyName
+          visible: existing?.visible ?? isVisible,
+          opacity: existing?.opacity ?? opacity,
+          name: existing?.name ?? friendlyName,
+          ...( existing?.isCustomLayer !== undefined ? { isCustomLayer: existing.isCustomLayer } : {}),
+          ...( existing?.customLayerType !== undefined ? { customLayerType: existing.customLayerType } : {}),
         };
       });
     }
