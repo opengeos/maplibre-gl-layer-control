@@ -1,49 +1,5 @@
 /* Layer Control Styles */
 
-/* Control button */
-.maplibregl-ctrl-layer-control {
-  background: #fff;
-  border-radius: 4px;
-  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-}
-
-.maplibregl-ctrl-layer-control button {
-  background: none;
-  border: none;
-  padding: 0;
-  width: 29px;
-  height: 29px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  outline: none;
-  color: #1f2a37;
-}
-
-.maplibregl-ctrl-layer-control button:hover {
-  background-color: rgba(0, 0, 0, 0.05);
-}
-
-.maplibregl-ctrl-layer-control .layer-control-icon {
-  width: 100%;
-  height: 100%;
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 0;
-}
-
-.maplibregl-ctrl-layer-control .layer-control-icon svg {
-  width: 22px;
-  height: 22px;
-  display: block;
-  stroke: currentColor;
-  fill: none;
-}
-
 /* Panel - positioned dynamically by JavaScript for floating behavior */
 .layer-control-panel {
   position: absolute;
