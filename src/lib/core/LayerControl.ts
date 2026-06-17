@@ -1830,7 +1830,7 @@ export class LayerControl implements IControl {
     const styleLayers = this.map.getStyle().layers || [];
 
     styleLayers.forEach(layer => {
-      if (!this.isUserAddedLayer(layer.id)) {
+      if (!this.isExcludedByPattern(layer.id) && !this.isUserAddedLayer(layer.id)) {
         this.state.backgroundLayerVisibility.set(layer.id, visible);
         this.map.setLayoutProperty(layer.id, 'visibility', visible ? 'visible' : 'none');
       }
