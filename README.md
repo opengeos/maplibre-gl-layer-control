@@ -12,9 +12,9 @@ A comprehensive layer control for MapLibre GL with advanced styling capabilities
 
 - ✅ **Auto-detection** - Automatically detects layer properties (opacity, visibility) and generates friendly names
 - ✅ **Layer visibility toggle** - Checkbox control for each layer
-- ✅ **Layer opacity control** - Smooth opacity slider with type-aware property mapping
+- ✅ **Layer opacity control** - Smooth opacity slider with type-aware property mapping; **double-click the slider to type an exact percentage (0-100%)**
 - ✅ **Layer symbols** - Visual type indicators (colored shapes) next to layer names, auto-detected from layer paint properties
-- ✅ **Resizable panel** - Adjustable panel width (240-420px) with keyboard support
+- ✅ **Resizable panel** - **Drag either edge of the panel to resize it**, plus a width slider and keyboard support
 - ✅ **Advanced style editor** - Per-layer-type styling controls:
   - **Fill layers**: color, opacity, outline-color
   - **Line layers**: color, width, opacity, blur

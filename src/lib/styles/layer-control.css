@@ -7,8 +7,9 @@
   background: #fff;
   border-radius: 4px;
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
-  min-width: 240px;
-  max-width: 420px;
+  /* Width is set explicitly in JS and clamped to the configured
+     panelMinWidth/panelMaxWidth; no fixed CSS min/max so custom bounds
+     (and edge-drag resizing) are honored. */
   max-height: 600px;
   overflow-y: auto;
   z-index: 1000;
@@ -70,7 +71,7 @@
 .layer-control-width-value {
   min-width: 44px;
   text-align: right;
-  font-feature-settings: 'tnum';
+  font-feature-settings: "tnum";
   color: #3a4756;
 }
 
@@ -95,6 +96,58 @@
   transform: translateY(-50%);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
   pointer-events: none;
+}
+
+/* Edge resize handle — drag the panel edge to resize its width */
+.layer-control-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 1001;
+}
+
+.layer-control-resize-handle-left {
+  left: 0;
+}
+
+.layer-control-resize-handle-right {
+  right: 0;
+}
+
+/* Subtle visual affordance on hover / while dragging */
+.layer-control-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.layer-control-resize-handle-left::before {
+  left: 1px;
+}
+
+.layer-control-resize-handle-right::before {
+  right: 1px;
+}
+
+.layer-control-resize-handle:hover::before,
+.layer-control-panel.resizing-active .layer-control-resize-handle::before {
+  background: #2f6fed;
+}
+
+.layer-control-panel.resizing-active {
+  user-select: none;
+}
+
+.layer-control-panel.resizing-active * {
+  cursor: ew-resize !important;
+  user-select: none !important;
 }
 
 /* Action buttons (Show All / Hide All) */
@@ -218,6 +271,55 @@
   border: 2px solid #333;
   border-radius: 50%;
   cursor: pointer;
+}
+
+/* Exact-opacity input popup (double-click the opacity slider) */
+.layer-control-opacity-input {
+  position: absolute;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: #fff;
+  border: 1px solid #d0d7e2;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+  color: #333;
+}
+
+.layer-control-opacity-input-label {
+  font-weight: 600;
+  color: #5c6a7d;
+}
+
+.layer-control-opacity-input-field {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.layer-control-opacity-input-field input {
+  width: 56px;
+  padding: 3px 6px;
+  border: 1px solid #c4ccd8;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #333;
+  text-align: right;
+  -moz-appearance: textfield;
+}
+
+.layer-control-opacity-input-field input:focus {
+  outline: none;
+  border-color: #2f6fed;
+  box-shadow: 0 0 0 2px rgba(47, 111, 237, 0.2);
+}
+
+.layer-control-opacity-input-suffix {
+  color: #5c6a7d;
+  font-weight: 500;
 }
 
 /* Style button */
@@ -454,7 +556,7 @@
 .style-control-value {
   min-width: 48px;
   text-align: right;
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: "SF Mono", "Monaco", "Consolas", monospace;
   font-size: 11px;
   color: #3a4756;
   font-weight: 500;
@@ -482,7 +584,7 @@
   padding: 4px 8px;
   border: 1px solid #d0d7e2;
   border-radius: 4px;
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: "SF Mono", "Monaco", "Consolas", monospace;
   font-size: 11px;
   color: #3a4756;
   background: #fff;
@@ -885,7 +987,9 @@
   z-index: 1001;
   background: #fff;
   border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.15),
+    0 0 0 1px rgba(0, 0, 0, 0.05);
   min-width: 180px;
   padding: 4px 0;
   font-size: 12px;

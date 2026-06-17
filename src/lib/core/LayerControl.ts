@@ -1,4 +1,8 @@
-import type { IControl, Map as MapLibreMap, LayerSpecification } from 'maplibre-gl';
+import type {
+  IControl,
+  Map as MapLibreMap,
+  LayerSpecification,
+} from "maplibre-gl";
 import type {
   LayerControlOptions,
   LayerState,
@@ -6,18 +10,25 @@ import type {
   OriginalStyle,
   InternalControlState,
   CustomLayerAdapter,
-} from './types';
-import { CustomLayerRegistry } from './CustomLayerRegistry';
-import { getLayerType, getLayerOpacity, setLayerOpacity } from '../utils/layerUtils';
-import { cacheOriginalLayerStyle, restoreOriginalStyle } from '../utils/styleCache';
-import { normalizeColor } from '../utils/colorUtils';
-import { formatNumericValue } from '../utils/formatters';
+} from "./types";
+import { CustomLayerRegistry } from "./CustomLayerRegistry";
+import {
+  getLayerType,
+  getLayerOpacity,
+  setLayerOpacity,
+} from "../utils/layerUtils";
+import {
+  cacheOriginalLayerStyle,
+  restoreOriginalStyle,
+} from "../utils/styleCache";
+import { normalizeColor } from "../utils/colorUtils";
+import { formatNumericValue, clamp } from "../utils/formatters";
 import {
   getLayerColor,
   getLayerColorFromSpec,
   createLayerSymbolSVG,
   createBackgroundGroupSymbolSVG,
-} from '../utils/symbolUtils';
+} from "../utils/symbolUtils";
 
 /**
  * LayerControl - A comprehensive layer control for MapLibre GL
@@ -45,6 +56,7 @@ export class LayerControl implements IControl {
   // Panel width management
   private minPanelWidth: number;
   private maxPanelWidth: number;
+  private initialPanelWidth: number;
   private maxPanelHeight: number;
   private showStyleEditor: boolean;
   private showOpacitySlider: boolean;
@@ -66,23 +78,44 @@ export class LayerControl implements IControl {
   private widthDragStartWidth: number | null = null;
   private widthFrame: number | null = null;
 
+  // Exact-opacity input popup
+  private opacityInputEl: HTMLDivElement | null = null;
+
+  // Panel edge-drag resizing (handles on both the left and right edges)
+  private resizeHandleEls: HTMLDivElement[] = [];
+  /** Which edge is anchored to the control corner (the other edge is "free") */
+  private panelAnchorSide: "left" | "right" = "right";
+  private isPanelResizing = false;
+  /** The physical edge being dragged in the current resize gesture */
+  private panelResizeEdge: "left" | "right" = "left";
+  private panelResizeStartX: number | null = null;
+  private panelResizeStartWidth: number | null = null;
+  private panelResizeStartOffset = 0;
+
   // Context menu and drag-drop
   private contextMenuEl: HTMLDivElement | null = null;
   private enableContextMenu: boolean;
   private enableDragAndDrop: boolean;
-  private onLayerRename?: (layerId: string, oldName: string, newName: string) => void;
+  private onLayerRename?: (
+    layerId: string,
+    oldName: string,
+    newName: string,
+  ) => void;
   private onLayerReorder?: (layerOrder: string[]) => void;
   private onLayerRemove?: (layerId: string) => void;
 
   constructor(options: LayerControlOptions = {}) {
     this.minPanelWidth = options.panelMinWidth || 240;
     this.maxPanelWidth = options.panelMaxWidth || 420;
+    this.initialPanelWidth = options.panelWidth || 350;
     this.maxPanelHeight = options.panelMaxHeight || 600;
     this.showStyleEditor = options.showStyleEditor !== false;
     this.showOpacitySlider = options.showOpacitySlider !== false;
     this.showLayerSymbol = options.showLayerSymbol !== false;
     this.excludeDrawnLayers = options.excludeDrawnLayers !== false;
-    this.excludeLayerPatterns = this.wildcardPatternsToRegex(options.excludeLayers || []);
+    this.excludeLayerPatterns = this.wildcardPatternsToRegex(
+      options.excludeLayers || [],
+    );
 
     // Context menu and drag-drop options
     this.enableContextMenu = options.enableContextMenu !== false;
@@ -128,7 +161,7 @@ export class LayerControl implements IControl {
     // Initialize custom layer registry if adapters are provided
     if (options.customLayerAdapters && options.customLayerAdapters.length > 0) {
       this.customLayerRegistry = new CustomLayerRegistry();
-      options.customLayerAdapters.forEach(adapter => {
+      options.customLayerAdapters.forEach((adapter) => {
         this.customLayerRegistry!.register(adapter);
       });
     }
@@ -155,7 +188,7 @@ export class LayerControl implements IControl {
 
     // Capture initial layer IDs - any layer added after this is user-added
     if (style && style.layers) {
-      this.initialLayerIds = new Set(style.layers.map(layer => layer.id));
+      this.initialLayerIds = new Set(style.layers.map((layer) => layer.id));
     } else {
       this.initialLayerIds = new Set();
     }
@@ -182,21 +215,26 @@ export class LayerControl implements IControl {
 
     // If basemapStyleUrl is provided, fetch it first for reliable layer detection
     if (this.basemapStyleUrl && !this.basemapLayerIds) {
-      this.fetchBasemapStyle().then(() => {
-        // Auto-detect layers after basemap style is fetched
-        if (Object.keys(this.state.layerStates).length === 0) {
-          this.autoDetectLayers();
-        }
-        // Build layer items
-        this.buildLayerItems();
-      }).catch(error => {
-        console.warn('Failed to fetch basemap style, falling back to heuristic detection:', error);
-        // Fall back to heuristic detection
-        if (Object.keys(this.state.layerStates).length === 0) {
-          this.autoDetectLayers();
-        }
-        this.buildLayerItems();
-      });
+      this.fetchBasemapStyle()
+        .then(() => {
+          // Auto-detect layers after basemap style is fetched
+          if (Object.keys(this.state.layerStates).length === 0) {
+            this.autoDetectLayers();
+          }
+          // Build layer items
+          this.buildLayerItems();
+        })
+        .catch((error) => {
+          console.warn(
+            "Failed to fetch basemap style, falling back to heuristic detection:",
+            error,
+          );
+          // Fall back to heuristic detection
+          if (Object.keys(this.state.layerStates).length === 0) {
+            this.autoDetectLayers();
+          }
+          this.buildLayerItems();
+        });
     } else {
       // Auto-detect layers using source-based heuristics
       if (Object.keys(this.state.layerStates).length === 0) {
@@ -234,13 +272,17 @@ export class LayerControl implements IControl {
       // Extract layer IDs from the basemap style
       if (styleJson && Array.isArray(styleJson.layers)) {
         this.basemapLayerIds = new Set(
-          styleJson.layers.map((layer: { id: string }) => layer.id)
+          styleJson.layers.map((layer: { id: string }) => layer.id),
         );
       } else {
         this.basemapLayerIds = new Set();
       }
     } catch (error) {
-      console.warn('Failed to fetch basemap style from URL:', this.basemapStyleUrl, error);
+      console.warn(
+        "Failed to fetch basemap style from URL:",
+        this.basemapStyleUrl,
+        error,
+      );
       throw error;
     }
   }
@@ -261,11 +303,11 @@ export class LayerControl implements IControl {
 
     // Remove resize event listeners
     if (this.resizeHandler) {
-      window.removeEventListener('resize', this.resizeHandler);
+      window.removeEventListener("resize", this.resizeHandler);
       this.resizeHandler = null;
     }
     if (this.mapResizeHandler) {
-      this.map.off('resize', this.mapResizeHandler);
+      this.map.off("resize", this.mapResizeHandler);
       this.mapResizeHandler = null;
     }
 
@@ -274,6 +316,9 @@ export class LayerControl implements IControl {
       this.contextMenuEl.parentNode?.removeChild(this.contextMenuEl);
       this.contextMenuEl = null;
     }
+
+    // Clean up the exact-opacity input popup
+    this.hideOpacityInput();
 
     // Clean up any active drag state
     this.cleanupDragState();
@@ -295,7 +340,7 @@ export class LayerControl implements IControl {
     }
 
     // Get all layer IDs from the map
-    const allLayerIds = style.layers.map(layer => layer.id);
+    const allLayerIds = style.layers.map((layer) => layer.id);
 
     if (this.targetLayers.length === 0) {
       // No layers specified - auto-detect user-added layers vs background layers
@@ -307,14 +352,15 @@ export class LayerControl implements IControl {
       // 2. Source-based heuristics - works for layers added before OR after control
       // Note: initialLayerIds is NOT used here because it would incorrectly classify
       // user layers added BEFORE the control as basemap layers
-      const useBasemapStyleDetection = this.basemapLayerIds !== null && this.basemapLayerIds.size > 0;
+      const useBasemapStyleDetection =
+        this.basemapLayerIds !== null && this.basemapLayerIds.size > 0;
 
       // Identify which sources are user-added (for source-based heuristic detection)
       const userAddedSourceIds = useBasemapStyleDetection
         ? new Set<string>()
         : this.detectUserAddedSources();
 
-      allLayerIds.forEach(layerId => {
+      allLayerIds.forEach((layerId) => {
         const layer = this.map.getLayer(layerId);
         if (!layer) return;
 
@@ -354,20 +400,20 @@ export class LayerControl implements IControl {
 
       // Add Background entry if there are background layers
       if (backgroundLayerIds.length > 0) {
-        this.state.layerStates['Background'] = {
+        this.state.layerStates["Background"] = {
           visible: true,
           opacity: 1.0,
-          name: 'Background'
+          name: "Background",
         };
       }
 
       // Add entries for auto-detected user layers
-      userAddedLayers.forEach(layerId => {
+      userAddedLayers.forEach((layerId) => {
         const layer = this.map.getLayer(layerId);
         if (!layer) return;
 
-        const visibility = this.map.getLayoutProperty(layerId, 'visibility');
-        const isVisible = visibility !== 'none';
+        const visibility = this.map.getLayoutProperty(layerId, "visibility");
+        const isVisible = visibility !== "none";
         const layerType = layer.type;
         const opacity = getLayerOpacity(this.map, layerId, layerType);
         const friendlyName = this.generateFriendlyName(layerId);
@@ -383,7 +429,7 @@ export class LayerControl implements IControl {
       const userLayers: string[] = [];
       const basemapLayers: string[] = [];
 
-      allLayerIds.forEach(layerId => {
+      allLayerIds.forEach((layerId) => {
         // Skip layers matching user-defined exclusion patterns
         if (this.isExcludedByPattern(layerId)) {
           basemapLayers.push(layerId);
@@ -399,20 +445,20 @@ export class LayerControl implements IControl {
 
       // Add Background entry if there are basemap layers
       if (basemapLayers.length > 0) {
-        this.state.layerStates['Background'] = {
+        this.state.layerStates["Background"] = {
           visible: true,
           opacity: 1.0,
-          name: 'Background'
+          name: "Background",
         };
       }
 
       // Add entries for user-specified layers
-      userLayers.forEach(layerId => {
+      userLayers.forEach((layerId) => {
         const layer = this.map.getLayer(layerId);
         if (!layer) return;
 
-        const visibility = this.map.getLayoutProperty(layerId, 'visibility');
-        const isVisible = visibility !== 'none';
+        const visibility = this.map.getLayoutProperty(layerId, "visibility");
+        const isVisible = visibility !== "none";
         const layerType = layer.type;
         const opacity = getLayerOpacity(this.map, layerId, layerType);
         const friendlyName = this.generateFriendlyName(layerId);
@@ -428,7 +474,7 @@ export class LayerControl implements IControl {
     // Detect custom layers from registry
     if (this.customLayerRegistry) {
       const customLayerIds = this.customLayerRegistry.getAllLayerIds();
-      customLayerIds.forEach(layerId => {
+      customLayerIds.forEach((layerId) => {
         // Skip if already in state
         if (this.state.layerStates[layerId]) return;
 
@@ -439,7 +485,8 @@ export class LayerControl implements IControl {
             opacity: customState.opacity,
             name: customState.name,
             isCustomLayer: true,
-            customLayerType: this.customLayerRegistry!.getSymbolType(layerId) || undefined,
+            customLayerType:
+              this.customLayerRegistry!.getSymbolType(layerId) || undefined,
           };
         }
       });
@@ -468,34 +515,40 @@ export class LayerControl implements IControl {
 
     // Known basemap providers
     const knownBasemapProviders = [
-      'demotiles.maplibre.org',
-      'api.maptiler.com',
-      'tiles.stadiamaps.com',
-      'api.mapbox.com',
-      'basemaps.cartocdn.com',
-      'tiles.mapbox.com',
-      'a.basemaps.cartocdn.com',
-      'b.basemaps.cartocdn.com',
-      'c.basemaps.cartocdn.com',
-      'd.basemaps.cartocdn.com',
-      'tiles.arcgis.com',
-      'server.arcgisonline.com',
-      'services.arcgisonline.com',
+      "demotiles.maplibre.org",
+      "api.maptiler.com",
+      "tiles.stadiamaps.com",
+      "api.mapbox.com",
+      "basemaps.cartocdn.com",
+      "tiles.mapbox.com",
+      "a.basemaps.cartocdn.com",
+      "b.basemaps.cartocdn.com",
+      "c.basemaps.cartocdn.com",
+      "d.basemaps.cartocdn.com",
+      "tiles.arcgis.com",
+      "server.arcgisonline.com",
+      "services.arcgisonline.com",
     ];
 
     // Detect domains from sprite/glyphs URLs (these are likely basemap domains)
     const spriteUrl = style.sprite as string | undefined;
-    if (spriteUrl && typeof spriteUrl === 'string') {
+    if (spriteUrl && typeof spriteUrl === "string") {
       try {
         const url = new URL(spriteUrl);
         basemapDomains.add(url.hostname);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     if (style.glyphs) {
       try {
-        const url = new URL(style.glyphs.replace('{fontstack}', 'x').replace('{range}', 'x'));
+        const url = new URL(
+          style.glyphs.replace("{fontstack}", "x").replace("{range}", "x"),
+        );
         basemapDomains.add(url.hostname);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
 
     // Check each source
@@ -511,20 +564,25 @@ export class LayerControl implements IControl {
       const sourceType = src.type;
 
       // Image, video, and canvas sources are always user-added
-      if (sourceType === 'image' || sourceType === 'video' || sourceType === 'canvas') {
+      if (
+        sourceType === "image" ||
+        sourceType === "video" ||
+        sourceType === "canvas"
+      ) {
         userAddedSources.add(sourceId);
         continue;
       }
 
       // GeoJSON sources with inline data objects are user-added (if added after initial load)
-      if (sourceType === 'geojson') {
-        if (src.data && typeof src.data === 'object') {
+      if (sourceType === "geojson") {
+        if (src.data && typeof src.data === "object") {
           userAddedSources.add(sourceId);
-        } else if (src.data && typeof src.data === 'string') {
+        } else if (src.data && typeof src.data === "string") {
           // GeoJSON with URL - check if it's from a basemap domain
           try {
             const url = new URL(src.data);
-            const isBasemap = knownBasemapProviders.some(p => url.hostname.includes(p)) ||
+            const isBasemap =
+              knownBasemapProviders.some((p) => url.hostname.includes(p)) ||
               basemapDomains.has(url.hostname);
             if (!isBasemap) {
               userAddedSources.add(sourceId);
@@ -538,16 +596,21 @@ export class LayerControl implements IControl {
       }
 
       // Check tile URLs for raster, raster-dem, and vector sources
-      if (sourceType === 'raster' || sourceType === 'raster-dem' || sourceType === 'vector') {
-        const tileUrl = src.url || (src.tiles && src.tiles[0]) || '';
+      if (
+        sourceType === "raster" ||
+        sourceType === "raster-dem" ||
+        sourceType === "vector"
+      ) {
+        const tileUrl = src.url || (src.tiles && src.tiles[0]) || "";
         if (tileUrl) {
           try {
-            const url = new URL(tileUrl.replace(/{[^}]+}/g, '0'));
+            const url = new URL(tileUrl.replace(/{[^}]+}/g, "0"));
             const hostname = url.hostname;
 
             // Check if this is a known basemap provider
-            const isKnownBasemap = knownBasemapProviders.some(provider =>
-              hostname === provider || hostname.endsWith('.' + provider)
+            const isKnownBasemap = knownBasemapProviders.some(
+              (provider) =>
+                hostname === provider || hostname.endsWith("." + provider),
             );
 
             // Check if this matches detected basemap domains
@@ -573,13 +636,13 @@ export class LayerControl implements IControl {
    */
   private generateFriendlyName(layerId: string): string {
     // Remove common prefixes
-    let name = layerId.replace(/^(layer[-_]?|gl[-_]?)/, '');
+    let name = layerId.replace(/^(layer[-_]?|gl[-_]?)/, "");
 
     // Replace dashes and underscores with spaces
-    name = name.replace(/[-_]/g, ' ');
+    name = name.replace(/[-_]/g, " ");
 
     // Capitalize first letter of each word
-    name = name.replace(/\b\w/g, char => char.toUpperCase());
+    name = name.replace(/\b\w/g, (char) => char.toUpperCase());
 
     return name || layerId; // Fallback to original if empty
   }
@@ -588,7 +651,10 @@ export class LayerControl implements IControl {
    * Merge auto-detected layer state with user-provided initial state.
    * User-provided values take precedence over detected values.
    */
-  private mergeWithUserState(layerId: string, detected: LayerState): LayerState {
+  private mergeWithUserState(
+    layerId: string,
+    detected: LayerState,
+  ): LayerState {
     const userState = this.initialLayerStates[layerId];
     if (!userState) return detected;
 
@@ -596,8 +662,12 @@ export class LayerControl implements IControl {
       visible: userState.visible ?? detected.visible,
       opacity: userState.opacity ?? detected.opacity,
       name: userState.name ?? detected.name,
-      ...(userState.isCustomLayer !== undefined && { isCustomLayer: userState.isCustomLayer }),
-      ...(userState.customLayerType !== undefined && { customLayerType: userState.customLayerType }),
+      ...(userState.isCustomLayer !== undefined && {
+        isCustomLayer: userState.isCustomLayer,
+      }),
+      ...(userState.customLayerType !== undefined && {
+        customLayerType: userState.customLayerType,
+      }),
     };
   }
 
@@ -609,31 +679,31 @@ export class LayerControl implements IControl {
   private isDrawnLayer(layerId: string): boolean {
     const drawnLayerPatterns = [
       // Drawing libraries
-      /^gm[-_\s]/i,                  // Geoman (gm-main-*, gm_*, Gm Temporary...)
-      /^gl-draw[-_]/i,               // Mapbox GL Draw
-      /^mapbox-gl-draw[-_]/i,        // Mapbox GL Draw alternative
-      /^terra-draw[-_]/i,            // Terra Draw
-      /^maplibre-gl-draw[-_]/i,      // MapLibre GL Draw
-      /^draw[-_]layer/i,             // Generic draw layers
+      /^gm[-_\s]/i, // Geoman (gm-main-*, gm_*, Gm Temporary...)
+      /^gl-draw[-_]/i, // Mapbox GL Draw
+      /^mapbox-gl-draw[-_]/i, // Mapbox GL Draw alternative
+      /^terra-draw[-_]/i, // Terra Draw
+      /^maplibre-gl-draw[-_]/i, // MapLibre GL Draw
+      /^draw[-_]layer/i, // Generic draw layers
       // maplibre-gl-components internal layers
-      /^measure-/i,                  // MeasureControl (measure-{id}-fill, measure-{id}-line)
-      /^pmtiles-source-/i,           // PMTilesLayerControl (managed via adapter)
-      /^stac-search-footprints/i,    // StacSearchControl footprint layers
+      /^measure-/i, // MeasureControl (measure-{id}-fill, measure-{id}-line)
+      /^pmtiles-source-/i, // PMTilesLayerControl (managed via adapter)
+      /^stac-search-footprints/i, // StacSearchControl footprint layers
     ];
 
-    return drawnLayerPatterns.some(pattern => pattern.test(layerId));
+    return drawnLayerPatterns.some((pattern) => pattern.test(layerId));
   }
 
   /**
    * Convert wildcard patterns (e.g., '*-temp-*', 'debug-*') to RegExp objects
    */
   private wildcardPatternsToRegex(patterns: string[]): RegExp[] {
-    return patterns.map(pattern => {
+    return patterns.map((pattern) => {
       // Escape special regex characters except *
-      const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+      const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
       // Convert * to .* for wildcard matching
-      const regexStr = escaped.replace(/\*/g, '.*');
-      return new RegExp(`^${regexStr}$`, 'i');
+      const regexStr = escaped.replace(/\*/g, ".*");
+      return new RegExp(`^${regexStr}$`, "i");
     });
   }
 
@@ -641,15 +711,16 @@ export class LayerControl implements IControl {
    * Check if a layer matches any of the user-defined exclusion patterns
    */
   private isExcludedByPattern(layerId: string): boolean {
-    return this.excludeLayerPatterns.some(pattern => pattern.test(layerId));
+    return this.excludeLayerPatterns.some((pattern) => pattern.test(layerId));
   }
 
   /**
    * Create the main container element
    */
   private createContainer(): HTMLDivElement {
-    const container = document.createElement('div');
-    container.className = 'maplibregl-ctrl maplibregl-ctrl-group maplibregl-ctrl-layer-control';
+    const container = document.createElement("div");
+    container.className =
+      "maplibregl-ctrl maplibregl-ctrl-group maplibregl-ctrl-layer-control";
     return container;
   }
 
@@ -657,21 +728,21 @@ export class LayerControl implements IControl {
    * Create the toggle button
    */
   private createToggleButton(): HTMLButtonElement {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.title = 'Layer Control';
-    button.setAttribute('aria-label', 'Layer Control');
+    const button = document.createElement("button");
+    button.type = "button";
+    button.title = "Layer Control";
+    button.setAttribute("aria-label", "Layer Control");
 
     // Create layers icon (SVG)
-    const icon = document.createElement('span');
-    icon.className = 'layer-control-icon';
+    const icon = document.createElement("span");
+    icon.className = "layer-control-icon";
     icon.innerHTML =
       '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" ' +
       'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
       '<polygon points="12 3 3 8.25 12 13.5 21 8.25 12 3"></polygon>' +
       '<polyline points="3 12.75 12 18 21 12.75"></polyline>' +
       '<polyline points="3 17.25 12 22 21 17.25"></polyline>' +
-      '</svg>';
+      "</svg>";
 
     button.appendChild(icon);
     return button;
@@ -681,15 +752,15 @@ export class LayerControl implements IControl {
    * Create the panel element
    */
   private createPanel(): HTMLDivElement {
-    const panel = document.createElement('div');
-    panel.className = 'layer-control-panel';
+    const panel = document.createElement("div");
+    panel.className = "layer-control-panel";
 
     // Set initial width and max height directly on the element
     panel.style.width = `${this.state.panelWidth}px`;
     panel.style.maxHeight = `${this.maxPanelHeight}px`;
 
     if (!this.state.collapsed) {
-      panel.classList.add('expanded');
+      panel.classList.add("expanded");
     }
 
     // Add header
@@ -700,23 +771,164 @@ export class LayerControl implements IControl {
     const actionButtons = this.createActionButtons();
     panel.appendChild(actionButtons);
 
+    // Add draggable edge handles (both sides) for resizing the panel width
+    panel.appendChild(this.createResizeHandle("left"));
+    panel.appendChild(this.createResizeHandle("right"));
+
     return panel;
+  }
+
+  /**
+   * Create a draggable edge handle for resizing the panel width. A handle is
+   * added on each side so the panel can be resized by dragging either edge,
+   * like a conventional resizable window.
+   *
+   * @param side Which physical edge of the panel the handle sits on
+   */
+  private createResizeHandle(side: "left" | "right"): HTMLDivElement {
+    const handle = document.createElement("div");
+    handle.className = `layer-control-resize-handle layer-control-resize-handle-${side}`;
+    handle.title = "Drag to resize panel";
+    handle.setAttribute("role", "separator");
+    handle.setAttribute("aria-orientation", "vertical");
+    this.resizeHandleEls.push(handle);
+    this.setupResizeHandleEvents(handle, side);
+    return handle;
+  }
+
+  /**
+   * Wire pointer events for an edge resize handle.
+   *
+   * @param handle The handle element
+   * @param side Which physical edge of the panel the handle sits on
+   */
+  private setupResizeHandleEvents(
+    handle: HTMLDivElement,
+    side: "left" | "right",
+  ): void {
+    handle.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.isPanelResizing = true;
+      this.panelResizeEdge = side;
+      this.panelResizeStartX = event.clientX;
+      this.panelResizeStartWidth = this.state.panelWidth;
+      // Remember the current offset of the anchored edge so we can keep the
+      // opposite (free) edge fixed when the anchored edge is dragged.
+      this.panelResizeStartOffset =
+        parseFloat(this.panel.style[this.panelAnchorSide]) || 0;
+      handle.setPointerCapture(event.pointerId);
+      this.panel.classList.add("resizing-active");
+    });
+
+    handle.addEventListener("pointermove", (event) => {
+      if (!this.isPanelResizing) return;
+      this.resizePanelFromPointer(event.clientX);
+    });
+
+    const endResize = (event: PointerEvent) => {
+      if (!this.isPanelResizing) return;
+      if (event.pointerId !== undefined) {
+        try {
+          handle.releasePointerCapture(event.pointerId);
+        } catch {
+          // Ignore release errors
+        }
+      }
+      this.isPanelResizing = false;
+      this.panelResizeStartX = null;
+      this.panelResizeStartWidth = null;
+      this.panel.classList.remove("resizing-active");
+    };
+
+    handle.addEventListener("pointerup", endResize);
+    handle.addEventListener("pointercancel", endResize);
+    handle.addEventListener("lostpointercapture", endResize);
+
+    // Double-click resets to the default/initial width
+    handle.addEventListener("dblclick", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.applyPanelWidth(this.initialPanelWidth, true);
+    });
+  }
+
+  /**
+   * Compute and apply a new panel width from the pointer position during an
+   * edge drag. Dragging the free edge changes the width while the anchored
+   * edge stays put; dragging the anchored edge shifts the anchor so the free
+   * edge stays put — both feel like resizing a normal window.
+   */
+  private resizePanelFromPointer(clientX: number): void {
+    const dx = clientX - (this.panelResizeStartX ?? clientX);
+    const startWidth = this.panelResizeStartWidth ?? this.state.panelWidth;
+
+    // Dragging the left edge left widens; dragging the right edge right widens.
+    const desiredWidth =
+      this.panelResizeEdge === "left" ? startWidth - dx : startWidth + dx;
+    const clamped = Math.round(
+      Math.min(this.maxPanelWidth, Math.max(this.minPanelWidth, desiredWidth)),
+    );
+
+    // When the dragged edge is the anchored edge, move the anchor so the
+    // opposite edge does not drift.
+    if (this.panelResizeEdge === this.panelAnchorSide) {
+      let appliedDelta = clamped - startWidth;
+      let newOffset = this.panelResizeStartOffset - appliedDelta;
+      if (newOffset < 0) {
+        // Don't push the panel past the map edge; cap the growth instead.
+        newOffset = 0;
+        appliedDelta = this.panelResizeStartOffset;
+      }
+      const finalWidth = Math.round(
+        Math.min(
+          this.maxPanelWidth,
+          Math.max(this.minPanelWidth, startWidth + appliedDelta),
+        ),
+      );
+      this.applyPanelWidth(finalWidth, true);
+      this.panel.style[this.panelAnchorSide] = `${newOffset}px`;
+    } else {
+      this.applyPanelWidth(clamped, true);
+    }
+  }
+
+  /**
+   * Record which panel edge is anchored to the control corner, based on the
+   * corner the control occupies. Right corners anchor the right edge (panel
+   * grows leftward); left corners anchor the left edge (panel grows rightward).
+   */
+  private updatePanelAnchorSide(
+    position: "top-left" | "top-right" | "bottom-left" | "bottom-right",
+  ): void {
+    this.panelAnchorSide =
+      position === "top-right" || position === "bottom-right"
+        ? "right"
+        : "left";
   }
 
   /**
    * Detect which corner the control is positioned in
    * @returns The position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
    */
-  private getControlPosition(): 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' {
+  private getControlPosition():
+    | "top-left"
+    | "top-right"
+    | "bottom-left"
+    | "bottom-right" {
     const parent = this.container.parentElement;
-    if (!parent) return 'top-right'; // Default
+    if (!parent) return "top-right"; // Default
 
-    if (parent.classList.contains('maplibregl-ctrl-top-left')) return 'top-left';
-    if (parent.classList.contains('maplibregl-ctrl-top-right')) return 'top-right';
-    if (parent.classList.contains('maplibregl-ctrl-bottom-left')) return 'bottom-left';
-    if (parent.classList.contains('maplibregl-ctrl-bottom-right')) return 'bottom-right';
+    if (parent.classList.contains("maplibregl-ctrl-top-left"))
+      return "top-left";
+    if (parent.classList.contains("maplibregl-ctrl-top-right"))
+      return "top-right";
+    if (parent.classList.contains("maplibregl-ctrl-bottom-left"))
+      return "bottom-left";
+    if (parent.classList.contains("maplibregl-ctrl-bottom-right"))
+      return "bottom-right";
 
-    return 'top-right'; // Default
+    return "top-right"; // Default
   }
 
   /**
@@ -730,6 +942,9 @@ export class LayerControl implements IControl {
     const mapRect = this.mapContainer.getBoundingClientRect();
     const position = this.getControlPosition();
 
+    // Track which edge is anchored to the control corner (for edge-drag resize)
+    this.updatePanelAnchorSide(position);
+
     // Calculate button position relative to map container
     const buttonTop = buttonRect.top - mapRect.top;
     const buttonBottom = mapRect.bottom - buttonRect.bottom;
@@ -739,31 +954,31 @@ export class LayerControl implements IControl {
     const panelGap = 5; // Gap between button and panel
 
     // Reset all positioning
-    this.panel.style.top = '';
-    this.panel.style.bottom = '';
-    this.panel.style.left = '';
-    this.panel.style.right = '';
+    this.panel.style.top = "";
+    this.panel.style.bottom = "";
+    this.panel.style.left = "";
+    this.panel.style.right = "";
 
     switch (position) {
-      case 'top-left':
+      case "top-left":
         // Panel expands down and to the right
         this.panel.style.top = `${buttonTop + buttonRect.height + panelGap}px`;
         this.panel.style.left = `${buttonLeft}px`;
         break;
 
-      case 'top-right':
+      case "top-right":
         // Panel expands down and to the left
         this.panel.style.top = `${buttonTop + buttonRect.height + panelGap}px`;
         this.panel.style.right = `${buttonRight}px`;
         break;
 
-      case 'bottom-left':
+      case "bottom-left":
         // Panel expands up and to the right
         this.panel.style.bottom = `${buttonBottom + buttonRect.height + panelGap}px`;
         this.panel.style.left = `${buttonLeft}px`;
         break;
 
-      case 'bottom-right':
+      case "bottom-right":
         // Panel expands up and to the left
         this.panel.style.bottom = `${buttonBottom + buttonRect.height + panelGap}px`;
         this.panel.style.right = `${buttonRight}px`;
@@ -775,22 +990,26 @@ export class LayerControl implements IControl {
    * Create action buttons for Show All / Hide All
    */
   private createActionButtons(): HTMLElement {
-    const container = document.createElement('div');
-    container.className = 'layer-control-actions';
+    const container = document.createElement("div");
+    container.className = "layer-control-actions";
 
-    const showAllBtn = document.createElement('button');
-    showAllBtn.type = 'button';
-    showAllBtn.className = 'layer-control-action-btn';
-    showAllBtn.textContent = 'Show All';
-    showAllBtn.title = 'Show all layers';
-    showAllBtn.addEventListener('click', () => this.setAllLayersVisibility(true));
+    const showAllBtn = document.createElement("button");
+    showAllBtn.type = "button";
+    showAllBtn.className = "layer-control-action-btn";
+    showAllBtn.textContent = "Show All";
+    showAllBtn.title = "Show all layers";
+    showAllBtn.addEventListener("click", () =>
+      this.setAllLayersVisibility(true),
+    );
 
-    const hideAllBtn = document.createElement('button');
-    hideAllBtn.type = 'button';
-    hideAllBtn.className = 'layer-control-action-btn';
-    hideAllBtn.textContent = 'Hide All';
-    hideAllBtn.title = 'Hide all layers';
-    hideAllBtn.addEventListener('click', () => this.setAllLayersVisibility(false));
+    const hideAllBtn = document.createElement("button");
+    hideAllBtn.type = "button";
+    hideAllBtn.className = "layer-control-action-btn";
+    hideAllBtn.textContent = "Hide All";
+    hideAllBtn.title = "Hide all layers";
+    hideAllBtn.addEventListener("click", () =>
+      this.setAllLayersVisibility(false),
+    );
 
     container.appendChild(showAllBtn);
     container.appendChild(hideAllBtn);
@@ -802,14 +1021,16 @@ export class LayerControl implements IControl {
    * Set visibility of all layers
    */
   private setAllLayersVisibility(visible: boolean): void {
-    Object.keys(this.state.layerStates).forEach(layerId => {
+    Object.keys(this.state.layerStates).forEach((layerId) => {
       // Use toggleLayerVisibility which handles both native and custom layers
       this.toggleLayerVisibility(layerId, visible);
 
       // Update checkbox in UI
       const itemEl = this.panel.querySelector(`[data-layer-id="${layerId}"]`);
       if (itemEl) {
-        const checkbox = itemEl.querySelector('.layer-control-checkbox') as HTMLInputElement;
+        const checkbox = itemEl.querySelector(
+          ".layer-control-checkbox",
+        ) as HTMLInputElement;
         if (checkbox) {
           checkbox.checked = visible;
           checkbox.indeterminate = false;
@@ -822,12 +1043,12 @@ export class LayerControl implements IControl {
    * Create the panel header with title and width control
    */
   private createPanelHeader(): HTMLElement {
-    const header = document.createElement('div');
-    header.className = 'layer-control-panel-header';
+    const header = document.createElement("div");
+    header.className = "layer-control-panel-header";
 
-    const title = document.createElement('span');
-    title.className = 'layer-control-panel-title';
-    title.textContent = 'Layers';
+    const title = document.createElement("span");
+    title.className = "layer-control-panel-title";
+    title.textContent = "Layers";
     header.appendChild(title);
 
     // Add width control
@@ -841,28 +1062,28 @@ export class LayerControl implements IControl {
    * Create the width control slider
    */
   private createWidthControl(): HTMLElement {
-    const widthControl = document.createElement('label');
-    widthControl.className = 'layer-control-width-control';
-    widthControl.title = 'Adjust layer panel width';
+    const widthControl = document.createElement("label");
+    widthControl.className = "layer-control-width-control";
+    widthControl.title = "Adjust layer panel width";
 
-    const widthLabel = document.createElement('span');
-    widthLabel.textContent = 'Width';
+    const widthLabel = document.createElement("span");
+    widthLabel.textContent = "Width";
     widthControl.appendChild(widthLabel);
 
-    const widthSlider = document.createElement('div');
-    widthSlider.className = 'layer-control-width-slider';
-    widthSlider.setAttribute('role', 'slider');
-    widthSlider.setAttribute('aria-valuemin', String(this.minPanelWidth));
-    widthSlider.setAttribute('aria-valuemax', String(this.maxPanelWidth));
-    widthSlider.setAttribute('aria-valuenow', String(this.state.panelWidth));
-    widthSlider.setAttribute('aria-valuestep', '10');
-    widthSlider.setAttribute('aria-label', 'Layer panel width');
+    const widthSlider = document.createElement("div");
+    widthSlider.className = "layer-control-width-slider";
+    widthSlider.setAttribute("role", "slider");
+    widthSlider.setAttribute("aria-valuemin", String(this.minPanelWidth));
+    widthSlider.setAttribute("aria-valuemax", String(this.maxPanelWidth));
+    widthSlider.setAttribute("aria-valuenow", String(this.state.panelWidth));
+    widthSlider.setAttribute("aria-valuestep", "10");
+    widthSlider.setAttribute("aria-label", "Layer panel width");
     widthSlider.tabIndex = 0;
 
-    const widthTrack = document.createElement('div');
-    widthTrack.className = 'layer-control-width-track';
-    const widthThumb = document.createElement('div');
-    widthThumb.className = 'layer-control-width-thumb';
+    const widthTrack = document.createElement("div");
+    widthTrack.className = "layer-control-width-track";
+    const widthThumb = document.createElement("div");
+    widthThumb.className = "layer-control-width-thumb";
 
     widthSlider.appendChild(widthTrack);
     widthSlider.appendChild(widthThumb);
@@ -871,8 +1092,8 @@ export class LayerControl implements IControl {
     this.widthThumbEl = widthThumb;
 
     // Add width value display
-    const widthValue = document.createElement('span');
-    widthValue.className = 'layer-control-width-value';
+    const widthValue = document.createElement("span");
+    widthValue.className = "layer-control-width-value";
     this.widthValueEl = widthValue;
 
     widthControl.appendChild(widthSlider);
@@ -889,7 +1110,7 @@ export class LayerControl implements IControl {
    */
   private setupWidthSliderEvents(widthSlider: HTMLElement): void {
     // Pointer events for dragging
-    widthSlider.addEventListener('pointerdown', (event) => {
+    widthSlider.addEventListener("pointerdown", (event) => {
       event.preventDefault();
       const rect = widthSlider.getBoundingClientRect();
       this.widthDragRectWidth = rect.width || 1;
@@ -900,7 +1121,7 @@ export class LayerControl implements IControl {
       this.updateWidthFromPointer(event, true);
     });
 
-    widthSlider.addEventListener('pointermove', (event) => {
+    widthSlider.addEventListener("pointermove", (event) => {
       if (!this.isWidthSliderActive) return;
       this.updateWidthFromPointer(event);
     });
@@ -921,34 +1142,34 @@ export class LayerControl implements IControl {
       this.updateWidthDisplay();
     };
 
-    widthSlider.addEventListener('pointerup', endPointerDrag);
-    widthSlider.addEventListener('pointercancel', endPointerDrag);
-    widthSlider.addEventListener('lostpointercapture', endPointerDrag);
+    widthSlider.addEventListener("pointerup", endPointerDrag);
+    widthSlider.addEventListener("pointercancel", endPointerDrag);
+    widthSlider.addEventListener("lostpointercapture", endPointerDrag);
 
     // Keyboard navigation
-    widthSlider.addEventListener('keydown', (event) => {
+    widthSlider.addEventListener("keydown", (event) => {
       let handled = true;
       const step = event.shiftKey ? 20 : 10;
 
       switch (event.key) {
-        case 'ArrowLeft':
-        case 'ArrowDown':
+        case "ArrowLeft":
+        case "ArrowDown":
           this.applyPanelWidth(this.state.panelWidth - step, true);
           break;
-        case 'ArrowRight':
-        case 'ArrowUp':
+        case "ArrowRight":
+        case "ArrowUp":
           this.applyPanelWidth(this.state.panelWidth + step, true);
           break;
-        case 'Home':
+        case "Home":
           this.applyPanelWidth(this.minPanelWidth, true);
           break;
-        case 'End':
+        case "End":
           this.applyPanelWidth(this.maxPanelWidth, true);
           break;
-        case 'PageUp':
+        case "PageUp":
           this.applyPanelWidth(this.state.panelWidth + 50, true);
           break;
-        case 'PageDown':
+        case "PageDown":
           this.applyPanelWidth(this.state.panelWidth - 50, true);
           break;
         default:
@@ -965,23 +1186,32 @@ export class LayerControl implements IControl {
   /**
    * Update panel width from pointer event
    */
-  private updateWidthFromPointer(event: PointerEvent, resetBaseline = false): void {
+  private updateWidthFromPointer(
+    event: PointerEvent,
+    resetBaseline = false,
+  ): void {
     if (!this.widthSliderEl) return;
 
-    const sliderWidth = this.widthDragRectWidth || this.widthSliderEl.getBoundingClientRect().width || 1;
+    const sliderWidth =
+      this.widthDragRectWidth ||
+      this.widthSliderEl.getBoundingClientRect().width ||
+      1;
     const widthRange = this.maxPanelWidth - this.minPanelWidth;
 
     let width: number;
     if (resetBaseline) {
       const rect = this.widthSliderEl.getBoundingClientRect();
-      const relative = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
+      const relative =
+        rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
       const clampedRatio = Math.min(1, Math.max(0, relative));
       width = this.minPanelWidth + clampedRatio * widthRange;
       this.widthDragStartWidth = width;
       this.widthDragStartX = event.clientX;
     } else {
       const delta = event.clientX - (this.widthDragStartX || event.clientX);
-      width = (this.widthDragStartWidth || this.state.panelWidth) + (delta / sliderWidth) * widthRange;
+      width =
+        (this.widthDragStartWidth || this.state.panelWidth) +
+        (delta / sliderWidth) * widthRange;
     }
 
     this.applyPanelWidth(width, this.isWidthSliderActive);
@@ -991,7 +1221,9 @@ export class LayerControl implements IControl {
    * Apply panel width (clamped to min/max)
    */
   private applyPanelWidth(width: number, immediate = false): void {
-    const clamped = Math.round(Math.min(this.maxPanelWidth, Math.max(this.minPanelWidth, width)));
+    const clamped = Math.round(
+      Math.min(this.maxPanelWidth, Math.max(this.minPanelWidth, width)),
+    );
 
     const applyWidth = () => {
       this.state.panelWidth = clamped;
@@ -1022,8 +1254,13 @@ export class LayerControl implements IControl {
       this.widthValueEl.textContent = `${this.state.panelWidth}px`;
     }
     if (this.widthSliderEl) {
-      this.widthSliderEl.setAttribute('aria-valuenow', String(this.state.panelWidth));
-      const ratio = (this.state.panelWidth - this.minPanelWidth) / (this.maxPanelWidth - this.minPanelWidth || 1);
+      this.widthSliderEl.setAttribute(
+        "aria-valuenow",
+        String(this.state.panelWidth),
+      );
+      const ratio =
+        (this.state.panelWidth - this.minPanelWidth) /
+        (this.maxPanelWidth - this.minPanelWidth || 1);
       if (this.widthThumbEl) {
         const sliderWidth = this.widthSliderEl.clientWidth;
         // If element not yet rendered, defer the update
@@ -1046,10 +1283,10 @@ export class LayerControl implements IControl {
    */
   private setupEventListeners(): void {
     // Toggle button click
-    this.button.addEventListener('click', () => this.toggle());
+    this.button.addEventListener("click", () => this.toggle());
 
     // Click outside to close panel and context menu
-    document.addEventListener('click', (e) => {
+    document.addEventListener("click", (e) => {
       const target = e.target as Node;
 
       // Close context menu if clicking outside of it
@@ -1071,7 +1308,7 @@ export class LayerControl implements IControl {
         this.updatePanelPosition();
       }
     };
-    window.addEventListener('resize', this.resizeHandler);
+    window.addEventListener("resize", this.resizeHandler);
 
     // Update panel position on map resize (e.g., sidebar toggle)
     this.mapResizeHandler = () => {
@@ -1079,7 +1316,7 @@ export class LayerControl implements IControl {
         this.updatePanelPosition();
       }
     };
-    this.map.on('resize', this.mapResizeHandler);
+    this.map.on("resize", this.mapResizeHandler);
 
     // Listen for map layer changes
     this.setupLayerChangeListeners();
@@ -1089,15 +1326,15 @@ export class LayerControl implements IControl {
    * Setup listeners for map layer changes
    */
   private setupLayerChangeListeners(): void {
-    this.map.on('styledata', () => {
+    this.map.on("styledata", () => {
       setTimeout(() => {
         this.updateLayerStatesFromMap();
         this.checkForNewLayers();
       }, 100);
     });
 
-    this.map.on('data', (e) => {
-      if (e.sourceDataType === 'content') {
+    this.map.on("data", (e) => {
+      if (e.sourceDataType === "content") {
         setTimeout(() => {
           this.updateLayerStatesFromMap();
           this.checkForNewLayers();
@@ -1105,8 +1342,8 @@ export class LayerControl implements IControl {
       }
     });
 
-    this.map.on('sourcedata', (e) => {
-      if (e.sourceDataType === 'metadata') {
+    this.map.on("sourcedata", (e) => {
+      if (e.sourceDataType === "metadata") {
         setTimeout(() => {
           this.checkForNewLayers();
         }, 150);
@@ -1115,13 +1352,15 @@ export class LayerControl implements IControl {
 
     // Subscribe to custom layer registry changes
     if (this.customLayerRegistry) {
-      this.customLayerUnsubscribe = this.customLayerRegistry.onChange((event, layerId) => {
-        // If a previously removed layer is re-added, allow it to appear again
-        if (event === 'add' && layerId) {
-          this.removedCustomLayerIds.delete(layerId);
-        }
-        setTimeout(() => this.checkForNewLayers(), 100);
-      });
+      this.customLayerUnsubscribe = this.customLayerRegistry.onChange(
+        (event, layerId) => {
+          // If a previously removed layer is re-added, allow it to appear again
+          if (event === "add" && layerId) {
+            this.removedCustomLayerIds.delete(layerId);
+          }
+          setTimeout(() => this.checkForNewLayers(), 100);
+        },
+      );
     }
   }
 
@@ -1141,7 +1380,7 @@ export class LayerControl implements IControl {
    */
   private expand(): void {
     this.state.collapsed = false;
-    this.panel.classList.add('expanded');
+    this.panel.classList.add("expanded");
     this.updatePanelPosition();
   }
 
@@ -1150,7 +1389,7 @@ export class LayerControl implements IControl {
    */
   private collapse(): void {
     this.state.collapsed = true;
-    this.panel.classList.remove('expanded');
+    this.panel.classList.remove("expanded");
   }
 
   /**
@@ -1158,13 +1397,16 @@ export class LayerControl implements IControl {
    */
   private buildLayerItems(): void {
     // Clear existing items
-    const existingItems = this.panel.querySelectorAll('.layer-control-item');
-    existingItems.forEach(item => item.remove());
+    const existingItems = this.panel.querySelectorAll(".layer-control-item");
+    existingItems.forEach((item) => item.remove());
     this.styleEditors.clear();
 
     // Add items for all layers in our state
     Object.entries(this.state.layerStates).forEach(([layerId, state]) => {
-      if (this.targetLayers.length === 0 || this.targetLayers.includes(layerId)) {
+      if (
+        this.targetLayers.length === 0 ||
+        this.targetLayers.includes(layerId)
+      ) {
         this.addLayerItem(layerId, state);
       }
     });
@@ -1174,16 +1416,16 @@ export class LayerControl implements IControl {
    * Add a single layer item to the panel
    */
   private addLayerItem(layerId: string, state: LayerState): void {
-    const item = document.createElement('div');
-    item.className = 'layer-control-item';
-    item.setAttribute('data-layer-id', layerId);
+    const item = document.createElement("div");
+    item.className = "layer-control-item";
+    item.setAttribute("data-layer-id", layerId);
 
-    const row = document.createElement('div');
-    row.className = 'layer-control-row';
+    const row = document.createElement("div");
+    row.className = "layer-control-row";
 
     // Add drag handle (disabled for Background layer for alignment)
     if (this.enableDragAndDrop) {
-      if (layerId === 'Background') {
+      if (layerId === "Background") {
         const disabledHandle = this.createDisabledDragHandle();
         row.appendChild(disabledHandle);
       } else {
@@ -1193,18 +1435,19 @@ export class LayerControl implements IControl {
     }
 
     // Visibility checkbox
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.className = 'layer-control-checkbox';
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.className = "layer-control-checkbox";
     checkbox.checked = state.visible;
-    checkbox.addEventListener('change', () => {
+    checkbox.addEventListener("change", () => {
       this.toggleLayerVisibility(layerId, checkbox.checked);
     });
 
     // Layer name - use custom name if set
-    const displayName = this.state.customLayerNames.get(layerId) || state.name || layerId;
-    const name = document.createElement('span');
-    name.className = 'layer-control-name';
+    const displayName =
+      this.state.customLayerNames.get(layerId) || state.name || layerId;
+    const name = document.createElement("span");
+    name.className = "layer-control-name";
     name.textContent = displayName;
     name.title = displayName;
 
@@ -1212,7 +1455,7 @@ export class LayerControl implements IControl {
 
     // Add layer symbol (if enabled)
     if (this.showLayerSymbol) {
-      if (layerId === 'Background') {
+      if (layerId === "Background") {
         // Special stacked layers symbol for background group
         const symbol = this.createBackgroundGroupSymbol();
         row.appendChild(symbol);
@@ -1228,26 +1471,32 @@ export class LayerControl implements IControl {
 
     // Opacity slider (conditionally shown)
     if (this.showOpacitySlider) {
-      const opacity = document.createElement('input');
-      opacity.type = 'range';
-      opacity.className = 'layer-control-opacity';
-      opacity.min = '0';
-      opacity.max = '1';
-      opacity.step = '0.01';
+      const opacity = document.createElement("input");
+      opacity.type = "range";
+      opacity.className = "layer-control-opacity";
+      opacity.min = "0";
+      opacity.max = "1";
+      opacity.step = "0.01";
       opacity.value = String(state.opacity);
       opacity.title = `Opacity: ${Math.round(state.opacity * 100)}%`;
 
       // Handle slider interaction tracking
-      opacity.addEventListener('mousedown', () => {
+      opacity.addEventListener("mousedown", () => {
         this.state.userInteractingWithSlider = true;
       });
-      opacity.addEventListener('mouseup', () => {
+      opacity.addEventListener("mouseup", () => {
         this.state.userInteractingWithSlider = false;
       });
 
-      opacity.addEventListener('input', () => {
+      opacity.addEventListener("input", () => {
         this.changeLayerOpacity(layerId, parseFloat(opacity.value));
         opacity.title = `Opacity: ${Math.round(parseFloat(opacity.value) * 100)}%`;
+      });
+
+      // Double-click to enter an exact opacity percentage (0-100)
+      opacity.addEventListener("dblclick", (event) => {
+        event.preventDefault();
+        this.showOpacityInput(layerId, opacity);
       });
 
       row.appendChild(opacity);
@@ -1255,7 +1504,7 @@ export class LayerControl implements IControl {
 
     // Style button for regular layers, legend button for Background
     if (this.showStyleEditor) {
-      if (layerId === 'Background') {
+      if (layerId === "Background") {
         const legendButton = this.createBackgroundLegendButton();
         row.appendChild(legendButton);
       } else {
@@ -1269,8 +1518,8 @@ export class LayerControl implements IControl {
     item.appendChild(row);
 
     // Add context menu event listener (skip for Background layer)
-    if (this.enableContextMenu && layerId !== 'Background') {
-      row.addEventListener('contextmenu', (e) => {
+    if (this.enableContextMenu && layerId !== "Background") {
+      row.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         e.stopPropagation();
         this.showContextMenu(layerId, e.clientX, e.clientY);
@@ -1289,13 +1538,13 @@ export class LayerControl implements IControl {
     // Check if it's a custom layer first
     const layerState = this.state.layerStates[layerId];
     if (layerState?.isCustomLayer) {
-      const symbolType = layerState.customLayerType || 'custom-raster';
+      const symbolType = layerState.customLayerType || "custom-raster";
       // Use a default color for custom layers
-      const color = '#4a90d9';
+      const color = "#4a90d9";
       const svgMarkup = createLayerSymbolSVG(symbolType, color);
 
-      const symbolContainer = document.createElement('span');
-      symbolContainer.className = 'layer-control-symbol';
+      const symbolContainer = document.createElement("span");
+      symbolContainer.className = "layer-control-symbol";
       symbolContainer.innerHTML = svgMarkup;
       symbolContainer.title = `Layer type: ${symbolType}`;
 
@@ -1310,8 +1559,8 @@ export class LayerControl implements IControl {
     const color = getLayerColor(this.map, layerId, layerType);
     const svgMarkup = createLayerSymbolSVG(layerType, color);
 
-    const symbolContainer = document.createElement('span');
-    symbolContainer.className = 'layer-control-symbol';
+    const symbolContainer = document.createElement("span");
+    symbolContainer.className = "layer-control-symbol";
     symbolContainer.innerHTML = svgMarkup;
     symbolContainer.title = `Layer type: ${layerType}`;
 
@@ -1327,8 +1576,8 @@ export class LayerControl implements IControl {
     const color = getLayerColorFromSpec(layer);
     const svgMarkup = createLayerSymbolSVG(layer.type, color, { size: 14 });
 
-    const symbolContainer = document.createElement('span');
-    symbolContainer.className = 'background-legend-layer-symbol';
+    const symbolContainer = document.createElement("span");
+    symbolContainer.className = "background-legend-layer-symbol";
     symbolContainer.innerHTML = svgMarkup;
     symbolContainer.title = `Layer type: ${layer.type}`;
 
@@ -1343,10 +1592,10 @@ export class LayerControl implements IControl {
   private createBackgroundGroupSymbol(): HTMLElement {
     const svgMarkup = createBackgroundGroupSymbolSVG(16);
 
-    const symbolContainer = document.createElement('span');
-    symbolContainer.className = 'layer-control-symbol';
+    const symbolContainer = document.createElement("span");
+    symbolContainer.className = "layer-control-symbol";
     symbolContainer.innerHTML = svgMarkup;
-    symbolContainer.title = 'Background layers';
+    symbolContainer.title = "Background layers";
 
     return symbolContainer;
   }
@@ -1356,7 +1605,7 @@ export class LayerControl implements IControl {
    */
   private toggleLayerVisibility(layerId: string, visible: boolean): void {
     // Handle Background layer group
-    if (layerId === 'Background') {
+    if (layerId === "Background") {
       this.toggleBackgroundVisibility(visible);
       return;
     }
@@ -1379,7 +1628,11 @@ export class LayerControl implements IControl {
     }
 
     // Fallback to native MapLibre layer
-    this.map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
+    this.map.setLayoutProperty(
+      layerId,
+      "visibility",
+      visible ? "visible" : "none",
+    );
 
     // Clear flag after styledata events have settled
     setTimeout(() => {
@@ -1388,11 +1641,120 @@ export class LayerControl implements IControl {
   }
 
   /**
+   * Show a small popup that lets the user type an exact opacity percentage
+   * (0-100) for a layer. Triggered by double-clicking the opacity slider.
+   *
+   * @param layerId The layer ID whose opacity is being edited
+   * @param slider The opacity range input associated with the layer row
+   */
+  private showOpacityInput(layerId: string, slider: HTMLInputElement): void {
+    // Close any existing opacity popup first
+    this.hideOpacityInput();
+
+    const popup = document.createElement("div");
+    popup.className = "layer-control-opacity-input";
+
+    const label = document.createElement("span");
+    label.className = "layer-control-opacity-input-label";
+    label.textContent = "Opacity";
+
+    const field = document.createElement("div");
+    field.className = "layer-control-opacity-input-field";
+
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "0";
+    input.max = "100";
+    input.step = "1";
+    input.value = String(Math.round(parseFloat(slider.value) * 100));
+
+    const suffix = document.createElement("span");
+    suffix.className = "layer-control-opacity-input-suffix";
+    suffix.textContent = "%";
+
+    field.appendChild(input);
+    field.appendChild(suffix);
+    popup.appendChild(label);
+    popup.appendChild(field);
+
+    // Prevent clicks inside the popup from collapsing the panel
+    popup.addEventListener("click", (event) => event.stopPropagation());
+    popup.addEventListener("pointerdown", (event) => event.stopPropagation());
+
+    let settled = false;
+    const apply = () => {
+      if (settled) return;
+      settled = true;
+      const pct = clamp(Math.round(parseFloat(input.value)), 0, 100);
+      if (!Number.isNaN(pct)) {
+        const opacity = pct / 100;
+        slider.value = String(opacity);
+        slider.title = `Opacity: ${pct}%`;
+        this.changeLayerOpacity(layerId, opacity);
+      }
+      this.hideOpacityInput();
+    };
+    const cancel = () => {
+      if (settled) return;
+      settled = true;
+      this.hideOpacityInput();
+    };
+
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        apply();
+        slider.focus();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        cancel();
+        slider.focus();
+      }
+    });
+    input.addEventListener("blur", apply);
+
+    this.mapContainer.appendChild(popup);
+    this.opacityInputEl = popup;
+
+    // Position the popup near the slider, relative to the map container
+    const sliderRect = slider.getBoundingClientRect();
+    const mapRect = this.mapContainer.getBoundingClientRect();
+    const popupRect = popup.getBoundingClientRect();
+
+    let left = sliderRect.left - mapRect.left;
+    let top = sliderRect.bottom - mapRect.top + 4;
+
+    // Keep the popup within the map bounds
+    if (left + popupRect.width > mapRect.width) {
+      left = Math.max(0, mapRect.width - popupRect.width - 5);
+    }
+    if (top + popupRect.height > mapRect.height) {
+      top = sliderRect.top - mapRect.top - popupRect.height - 4;
+    }
+
+    popup.style.left = `${Math.max(0, left)}px`;
+    popup.style.top = `${Math.max(0, top)}px`;
+
+    input.focus();
+    input.select();
+  }
+
+  /**
+   * Remove the exact-opacity input popup if it is open.
+   */
+  private hideOpacityInput(): void {
+    if (this.opacityInputEl) {
+      this.opacityInputEl.remove();
+      this.opacityInputEl = null;
+    }
+  }
+
+  /**
    * Change layer opacity
    */
   private changeLayerOpacity(layerId: string, opacity: number): void {
     // Handle Background layer group
-    if (layerId === 'Background') {
+    if (layerId === "Background") {
       this.changeBackgroundOpacity(opacity);
       return;
     }
@@ -1432,7 +1794,10 @@ export class LayerControl implements IControl {
    */
   private isUserAddedLayer(layerId: string): boolean {
     // If this layer is in our state (and not Background), it's user-added
-    if (this.state.layerStates[layerId] !== undefined && layerId !== 'Background') {
+    if (
+      this.state.layerStates[layerId] !== undefined &&
+      layerId !== "Background"
+    ) {
       return true;
     }
 
@@ -1466,26 +1831,34 @@ export class LayerControl implements IControl {
    */
   private toggleBackgroundVisibility(visible: boolean): void {
     // Update local state
-    if (this.state.layerStates['Background']) {
-      this.state.layerStates['Background'].visible = visible;
+    if (this.state.layerStates["Background"]) {
+      this.state.layerStates["Background"].visible = visible;
     }
 
     // Apply to all basemap layers (layers not in layerStates)
     const styleLayers = this.map.getStyle().layers || [];
-    styleLayers.forEach(layer => {
+    styleLayers.forEach((layer) => {
       if (!this.isUserAddedLayer(layer.id)) {
         // Update visibility cache
         this.state.backgroundLayerVisibility.set(layer.id, visible);
-        this.map.setLayoutProperty(layer.id, 'visibility', visible ? 'visible' : 'none');
+        this.map.setLayoutProperty(
+          layer.id,
+          "visibility",
+          visible ? "visible" : "none",
+        );
       }
     });
 
     // Update legend panel checkboxes if open
     if (this.state.backgroundLegendOpen) {
-      const legendPanel = this.panel.querySelector('.layer-control-background-legend');
+      const legendPanel = this.panel.querySelector(
+        ".layer-control-background-legend",
+      );
       if (legendPanel) {
-        const checkboxes = legendPanel.querySelectorAll('.background-legend-checkbox') as NodeListOf<HTMLInputElement>;
-        checkboxes.forEach(checkbox => {
+        const checkboxes = legendPanel.querySelectorAll(
+          ".background-legend-checkbox",
+        ) as NodeListOf<HTMLInputElement>;
+        checkboxes.forEach((checkbox) => {
           checkbox.checked = visible;
         });
       }
@@ -1497,13 +1870,13 @@ export class LayerControl implements IControl {
    */
   private changeBackgroundOpacity(opacity: number): void {
     // Update local state
-    if (this.state.layerStates['Background']) {
-      this.state.layerStates['Background'].opacity = opacity;
+    if (this.state.layerStates["Background"]) {
+      this.state.layerStates["Background"].opacity = opacity;
     }
 
     // Apply to all basemap layers (layers not in layerStates)
     const styleLayers = this.map.getStyle().layers || [];
-    styleLayers.forEach(styleLayer => {
+    styleLayers.forEach((styleLayer) => {
       if (!this.isUserAddedLayer(styleLayer.id)) {
         const layerType = getLayerType(this.map, styleLayer.id);
         if (layerType) {
@@ -1519,14 +1892,21 @@ export class LayerControl implements IControl {
    * Create legend button for Background layer
    */
   private createBackgroundLegendButton(): HTMLButtonElement {
-    const button = document.createElement('button');
-    button.className = 'layer-control-style-button layer-control-background-legend-button';
-    button.innerHTML = '&#9881;'; // Gear icon (same as style button)
-    button.title = 'Show background layer details';
-    button.setAttribute('aria-label', 'Show background layer visibility controls');
-    button.setAttribute('aria-expanded', String(this.state.backgroundLegendOpen));
+    const button = document.createElement("button");
+    button.className =
+      "layer-control-style-button layer-control-background-legend-button";
+    button.innerHTML = "&#9881;"; // Gear icon (same as style button)
+    button.title = "Show background layer details";
+    button.setAttribute(
+      "aria-label",
+      "Show background layer visibility controls",
+    );
+    button.setAttribute(
+      "aria-expanded",
+      String(this.state.backgroundLegendOpen),
+    );
 
-    button.addEventListener('click', (e) => {
+    button.addEventListener("click", (e) => {
       e.stopPropagation();
       this.toggleBackgroundLegend();
     });
@@ -1558,10 +1938,12 @@ export class LayerControl implements IControl {
     if (!itemEl) return;
 
     // Check if panel already exists
-    let legendPanel = itemEl.querySelector('.layer-control-background-legend');
+    let legendPanel = itemEl.querySelector(".layer-control-background-legend");
     if (legendPanel) {
       // Refresh the list
-      const layerList = legendPanel.querySelector('.background-legend-layer-list');
+      const layerList = legendPanel.querySelector(
+        ".background-legend-layer-list",
+      );
       if (layerList) {
         this.populateBackgroundLayerList(layerList as HTMLElement);
       }
@@ -1574,15 +1956,17 @@ export class LayerControl implements IControl {
     this.state.backgroundLegendOpen = true;
 
     // Update button aria state
-    const button = itemEl.querySelector('.layer-control-background-legend-button');
+    const button = itemEl.querySelector(
+      ".layer-control-background-legend-button",
+    );
     if (button) {
-      button.setAttribute('aria-expanded', 'true');
-      button.classList.add('active');
+      button.setAttribute("aria-expanded", "true");
+      button.classList.add("active");
     }
 
     // Scroll into view
     setTimeout(() => {
-      legendPanel?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      legendPanel?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 50);
   }
 
@@ -1593,7 +1977,9 @@ export class LayerControl implements IControl {
     const itemEl = this.panel.querySelector('[data-layer-id="Background"]');
     if (!itemEl) return;
 
-    const legendPanel = itemEl.querySelector('.layer-control-background-legend');
+    const legendPanel = itemEl.querySelector(
+      ".layer-control-background-legend",
+    );
     if (legendPanel) {
       legendPanel.remove();
     }
@@ -1601,10 +1987,12 @@ export class LayerControl implements IControl {
     this.state.backgroundLegendOpen = false;
 
     // Update button aria state
-    const button = itemEl.querySelector('.layer-control-background-legend-button');
+    const button = itemEl.querySelector(
+      ".layer-control-background-legend-button",
+    );
     if (button) {
-      button.setAttribute('aria-expanded', 'false');
-      button.classList.remove('active');
+      button.setAttribute("aria-expanded", "false");
+      button.classList.remove("active");
     }
   }
 
@@ -1612,22 +2000,22 @@ export class LayerControl implements IControl {
    * Create the background legend panel with individual layer controls
    */
   private createBackgroundLegendPanel(): HTMLDivElement {
-    const panel = document.createElement('div');
-    panel.className = 'layer-control-background-legend';
+    const panel = document.createElement("div");
+    panel.className = "layer-control-background-legend";
 
     // Header
-    const header = document.createElement('div');
-    header.className = 'background-legend-header';
+    const header = document.createElement("div");
+    header.className = "background-legend-header";
 
-    const title = document.createElement('span');
-    title.className = 'background-legend-title';
-    title.textContent = 'Background Layers';
+    const title = document.createElement("span");
+    title.className = "background-legend-title";
+    title.textContent = "Background Layers";
 
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'background-legend-close';
-    closeBtn.innerHTML = '&times;';
-    closeBtn.title = 'Close';
-    closeBtn.addEventListener('click', (e) => {
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "background-legend-close";
+    closeBtn.innerHTML = "&times;";
+    closeBtn.title = "Close";
+    closeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       this.closeBackgroundLegend();
     });
@@ -1636,50 +2024,54 @@ export class LayerControl implements IControl {
     header.appendChild(closeBtn);
 
     // Quick actions row
-    const actionsRow = document.createElement('div');
-    actionsRow.className = 'background-legend-actions';
+    const actionsRow = document.createElement("div");
+    actionsRow.className = "background-legend-actions";
 
-    const showAllBtn = document.createElement('button');
-    showAllBtn.className = 'background-legend-action-btn';
-    showAllBtn.textContent = 'Show All';
-    showAllBtn.addEventListener('click', () => this.setAllBackgroundLayersVisibility(true));
+    const showAllBtn = document.createElement("button");
+    showAllBtn.className = "background-legend-action-btn";
+    showAllBtn.textContent = "Show All";
+    showAllBtn.addEventListener("click", () =>
+      this.setAllBackgroundLayersVisibility(true),
+    );
 
-    const hideAllBtn = document.createElement('button');
-    hideAllBtn.className = 'background-legend-action-btn';
-    hideAllBtn.textContent = 'Hide All';
-    hideAllBtn.addEventListener('click', () => this.setAllBackgroundLayersVisibility(false));
+    const hideAllBtn = document.createElement("button");
+    hideAllBtn.className = "background-legend-action-btn";
+    hideAllBtn.textContent = "Hide All";
+    hideAllBtn.addEventListener("click", () =>
+      this.setAllBackgroundLayersVisibility(false),
+    );
 
     actionsRow.appendChild(showAllBtn);
     actionsRow.appendChild(hideAllBtn);
 
     // Filter row - "Only rendered" checkbox
-    const filterRow = document.createElement('div');
-    filterRow.className = 'background-legend-filter';
+    const filterRow = document.createElement("div");
+    filterRow.className = "background-legend-filter";
 
-    const filterCheckbox = document.createElement('input');
-    filterCheckbox.type = 'checkbox';
-    filterCheckbox.className = 'background-legend-filter-checkbox';
-    filterCheckbox.id = 'background-legend-only-rendered';
+    const filterCheckbox = document.createElement("input");
+    filterCheckbox.type = "checkbox";
+    filterCheckbox.className = "background-legend-filter-checkbox";
+    filterCheckbox.id = "background-legend-only-rendered";
     filterCheckbox.checked = this.state.onlyRenderedFilter;
-    filterCheckbox.addEventListener('change', () => {
+    filterCheckbox.addEventListener("change", () => {
       this.state.onlyRenderedFilter = filterCheckbox.checked;
-      const layerList = panel.querySelector('.background-legend-layer-list');
+      const layerList = panel.querySelector(".background-legend-layer-list");
       if (layerList) {
         this.populateBackgroundLayerList(layerList as HTMLElement);
       }
     });
 
-    const filterLabel = document.createElement('label');
-    filterLabel.className = 'background-legend-filter-label';
-    filterLabel.htmlFor = 'background-legend-only-rendered';
-    filterLabel.textContent = 'Only rendered';
+    const filterLabel = document.createElement("label");
+    filterLabel.className = "background-legend-filter-label";
+    filterLabel.htmlFor = "background-legend-only-rendered";
+    filterLabel.textContent = "Only rendered";
 
     filterRow.appendChild(filterCheckbox);
     filterRow.appendChild(filterLabel);
 
     // Layer list container (scrollable)
-    const layerList = document.createElement('div');
-    layerList.className = 'background-legend-layer-list';
+    const layerList = document.createElement("div");
+    layerList.className = "background-legend-layer-list";
 
     // Populate with background layers
     this.populateBackgroundLayerList(layerList);
@@ -1701,17 +2093,17 @@ export class LayerControl implements IControl {
       if (!layer) return false;
 
       // Check if layer is visible first
-      const visibility = this.map.getLayoutProperty(layerId, 'visibility');
-      if (visibility === 'none') return false;
+      const visibility = this.map.getLayoutProperty(layerId, "visibility");
+      if (visibility === "none") return false;
 
       // For raster layers, check if tiles are loaded
-      if (layer.type === 'raster' || layer.type === 'hillshade') {
+      if (layer.type === "raster" || layer.type === "hillshade") {
         // Raster layers are considered rendered if visible
         return true;
       }
 
       // For background layers (solid color), they're always rendered if visible
-      if (layer.type === 'background') {
+      if (layer.type === "background") {
         return true;
       }
 
@@ -1728,11 +2120,11 @@ export class LayerControl implements IControl {
    * Populate the background layer list with individual layers
    */
   private populateBackgroundLayerList(container: HTMLElement): void {
-    container.innerHTML = ''; // Clear existing
+    container.innerHTML = ""; // Clear existing
 
     const styleLayers = this.map.getStyle().layers || [];
 
-    styleLayers.forEach(layer => {
+    styleLayers.forEach((layer) => {
       if (!this.isUserAddedLayer(layer.id)) {
         // Skip drawn layers if excludeDrawnLayers is enabled
         if (this.excludeDrawnLayers && this.isDrawnLayer(layer.id)) {
@@ -1750,36 +2142,36 @@ export class LayerControl implements IControl {
         }
 
         // This is a background layer
-        const layerRow = document.createElement('div');
-        layerRow.className = 'background-legend-layer-row';
-        layerRow.setAttribute('data-background-layer-id', layer.id);
+        const layerRow = document.createElement("div");
+        layerRow.className = "background-legend-layer-row";
+        layerRow.setAttribute("data-background-layer-id", layer.id);
 
         // Checkbox
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.className = 'background-legend-checkbox';
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.className = "background-legend-checkbox";
 
         // Get visibility from map or cache
-        const visibility = this.map.getLayoutProperty(layer.id, 'visibility');
-        const isVisible = visibility !== 'none';
+        const visibility = this.map.getLayoutProperty(layer.id, "visibility");
+        const isVisible = visibility !== "none";
         checkbox.checked = isVisible;
 
         // Update cache
         this.state.backgroundLayerVisibility.set(layer.id, isVisible);
 
-        checkbox.addEventListener('change', () => {
+        checkbox.addEventListener("change", () => {
           this.toggleIndividualBackgroundLayer(layer.id, checkbox.checked);
         });
 
         // Layer name
-        const name = document.createElement('span');
-        name.className = 'background-legend-layer-name';
+        const name = document.createElement("span");
+        name.className = "background-legend-layer-name";
         name.textContent = this.generateFriendlyName(layer.id);
         name.title = layer.id; // Show full ID on hover
 
         // Layer type indicator
-        const typeIndicator = document.createElement('span');
-        typeIndicator.className = 'background-legend-layer-type';
+        const typeIndicator = document.createElement("span");
+        typeIndicator.className = "background-legend-layer-type";
         typeIndicator.textContent = layer.type;
 
         layerRow.appendChild(checkbox);
@@ -1800,11 +2192,11 @@ export class LayerControl implements IControl {
 
     // Show message if no background layers
     if (container.children.length === 0) {
-      const emptyMsg = document.createElement('p');
-      emptyMsg.className = 'background-legend-empty';
+      const emptyMsg = document.createElement("p");
+      emptyMsg.className = "background-legend-empty";
       emptyMsg.textContent = this.state.onlyRenderedFilter
-        ? 'No rendered layers in current view.'
-        : 'No background layers found.';
+        ? "No rendered layers in current view."
+        : "No background layers found.";
       container.appendChild(emptyMsg);
     }
   }
@@ -1812,12 +2204,19 @@ export class LayerControl implements IControl {
   /**
    * Toggle visibility of an individual background layer
    */
-  private toggleIndividualBackgroundLayer(layerId: string, visible: boolean): void {
+  private toggleIndividualBackgroundLayer(
+    layerId: string,
+    visible: boolean,
+  ): void {
     // Update visibility cache
     this.state.backgroundLayerVisibility.set(layerId, visible);
 
     // Apply to map
-    this.map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
+    this.map.setLayoutProperty(
+      layerId,
+      "visibility",
+      visible ? "visible" : "none",
+    );
 
     // Update the main Background checkbox state
     this.updateBackgroundCheckboxState();
@@ -1829,18 +2228,26 @@ export class LayerControl implements IControl {
   private setAllBackgroundLayersVisibility(visible: boolean): void {
     const styleLayers = this.map.getStyle().layers || [];
 
-    styleLayers.forEach(layer => {
+    styleLayers.forEach((layer) => {
       if (!this.isUserAddedLayer(layer.id)) {
         this.state.backgroundLayerVisibility.set(layer.id, visible);
-        this.map.setLayoutProperty(layer.id, 'visibility', visible ? 'visible' : 'none');
+        this.map.setLayoutProperty(
+          layer.id,
+          "visibility",
+          visible ? "visible" : "none",
+        );
       }
     });
 
     // Update checkboxes in the legend panel
-    const legendPanel = this.panel.querySelector('.layer-control-background-legend');
+    const legendPanel = this.panel.querySelector(
+      ".layer-control-background-legend",
+    );
     if (legendPanel) {
-      const checkboxes = legendPanel.querySelectorAll('.background-legend-checkbox') as NodeListOf<HTMLInputElement>;
-      checkboxes.forEach(checkbox => {
+      const checkboxes = legendPanel.querySelectorAll(
+        ".background-legend-checkbox",
+      ) as NodeListOf<HTMLInputElement>;
+      checkboxes.forEach((checkbox) => {
         checkbox.checked = visible;
       });
     }
@@ -1857,7 +2264,7 @@ export class LayerControl implements IControl {
     let anyVisible = false;
     let allVisible = true;
 
-    styleLayers.forEach(layer => {
+    styleLayers.forEach((layer) => {
       if (!this.isUserAddedLayer(layer.id)) {
         const visible = this.state.backgroundLayerVisibility.get(layer.id);
         if (visible === true) anyVisible = true;
@@ -1866,9 +2273,13 @@ export class LayerControl implements IControl {
     });
 
     // Update main checkbox
-    const backgroundItem = this.panel.querySelector('[data-layer-id="Background"]');
+    const backgroundItem = this.panel.querySelector(
+      '[data-layer-id="Background"]',
+    );
     if (backgroundItem) {
-      const checkbox = backgroundItem.querySelector('.layer-control-checkbox') as HTMLInputElement;
+      const checkbox = backgroundItem.querySelector(
+        ".layer-control-checkbox",
+      ) as HTMLInputElement;
       if (checkbox) {
         checkbox.checked = anyVisible;
         checkbox.indeterminate = anyVisible && !allVisible;
@@ -1876,8 +2287,8 @@ export class LayerControl implements IControl {
     }
 
     // Update layerState
-    if (this.state.layerStates['Background']) {
-      this.state.layerStates['Background'].visible = anyVisible;
+    if (this.state.layerStates["Background"]) {
+      this.state.layerStates["Background"].visible = anyVisible;
     }
   }
 
@@ -1886,27 +2297,27 @@ export class LayerControl implements IControl {
    */
   private createStyleButton(layerId: string): HTMLButtonElement | null {
     // Don't create button for Background layer
-    if (layerId === 'Background') {
+    if (layerId === "Background") {
       return null;
     }
 
     const layerState = this.state.layerStates[layerId];
     const isCustomLayer = layerState?.isCustomLayer === true;
 
-    const button = document.createElement('button');
-    button.className = 'layer-control-style-button';
-    button.innerHTML = '&#9881;'; // Gear icon
+    const button = document.createElement("button");
+    button.className = "layer-control-style-button";
+    button.innerHTML = "&#9881;"; // Gear icon
 
     if (isCustomLayer) {
       // Custom layers don't support style editing - show info panel instead
-      button.title = 'Layer info (style editing not available)';
-      button.setAttribute('aria-label', `Layer info for ${layerId}`);
+      button.title = "Layer info (style editing not available)";
+      button.setAttribute("aria-label", `Layer info for ${layerId}`);
     } else {
-      button.title = 'Edit layer style';
-      button.setAttribute('aria-label', `Edit style for ${layerId}`);
+      button.title = "Edit layer style";
+      button.setAttribute("aria-label", `Edit style for ${layerId}`);
     }
 
-    button.addEventListener('click', (e) => {
+    button.addEventListener("click", (e) => {
       e.stopPropagation();
       this.toggleStyleEditor(layerId);
     });
@@ -1944,27 +2355,35 @@ export class LayerControl implements IControl {
     const layerState = this.state.layerStates[layerId];
     if (layerState?.isCustomLayer) {
       // Check if the adapter provides native MapLibre layer IDs for style editing
-      const nativeLayerIds = this.customLayerRegistry?.getNativeLayerIds(layerId);
+      const nativeLayerIds =
+        this.customLayerRegistry?.getNativeLayerIds(layerId);
       if (nativeLayerIds && nativeLayerIds.length > 0) {
         // Cache original styles for all native sublayers
         for (const nativeId of nativeLayerIds) {
           if (!this.state.originalStyles.has(nativeId)) {
             const nativeLayer = this.map.getLayer(nativeId);
             if (nativeLayer) {
-              cacheOriginalLayerStyle(this.map, nativeId, this.state.originalStyles);
+              cacheOriginalLayerStyle(
+                this.map,
+                nativeId,
+                this.state.originalStyles,
+              );
             }
           }
         }
 
         // Create combined style editor for native sublayers
-        const editor = this.createNativeSubLayerStyleEditor(layerId, nativeLayerIds);
+        const editor = this.createNativeSubLayerStyleEditor(
+          layerId,
+          nativeLayerIds,
+        );
         if (editor) {
           itemEl.appendChild(editor);
           this.styleEditors.set(layerId, editor);
           this.state.activeStyleEditor = layerId;
 
           setTimeout(() => {
-            editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            editor.scrollIntoView({ behavior: "smooth", block: "nearest" });
           }, 50);
           return;
         }
@@ -1978,7 +2397,7 @@ export class LayerControl implements IControl {
 
       // Scroll into view
       setTimeout(() => {
-        editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        editor.scrollIntoView({ behavior: "smooth", block: "nearest" });
       }, 50);
       return;
     }
@@ -2001,7 +2420,7 @@ export class LayerControl implements IControl {
 
     // Scroll editor into view
     setTimeout(() => {
-      editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      editor.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 50);
   }
 
@@ -2009,22 +2428,22 @@ export class LayerControl implements IControl {
    * Create info panel for custom layers (style editing not supported)
    */
   private createCustomLayerInfoPanel(layerId: string): HTMLDivElement {
-    const editor = document.createElement('div');
-    editor.className = 'layer-control-style-editor layer-control-custom-info';
+    const editor = document.createElement("div");
+    editor.className = "layer-control-style-editor layer-control-custom-info";
 
     // Header
-    const header = document.createElement('div');
-    header.className = 'style-editor-header';
+    const header = document.createElement("div");
+    header.className = "style-editor-header";
 
-    const title = document.createElement('span');
-    title.className = 'style-editor-title';
-    title.textContent = 'Layer Info';
+    const title = document.createElement("span");
+    title.className = "style-editor-title";
+    title.textContent = "Layer Info";
 
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'style-editor-close';
-    closeBtn.innerHTML = '&times;';
-    closeBtn.title = 'Close';
-    closeBtn.addEventListener('click', (e) => {
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "style-editor-close";
+    closeBtn.innerHTML = "&times;";
+    closeBtn.title = "Close";
+    closeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       this.closeStyleEditor(layerId);
     });
@@ -2033,24 +2452,24 @@ export class LayerControl implements IControl {
     header.appendChild(closeBtn);
 
     // Info content
-    const content = document.createElement('div');
-    content.className = 'style-editor-controls';
+    const content = document.createElement("div");
+    content.className = "style-editor-controls";
 
-    const infoText = document.createElement('p');
-    infoText.className = 'layer-control-custom-info-text';
+    const infoText = document.createElement("p");
+    infoText.className = "layer-control-custom-info-text";
     infoText.textContent = `This is a custom layer. Style editing is not available for this layer type. Use the visibility toggle and opacity slider to control the layer.`;
 
     content.appendChild(infoText);
 
     // Action buttons
-    const actions = document.createElement('div');
-    actions.className = 'style-editor-actions';
+    const actions = document.createElement("div");
+    actions.className = "style-editor-actions";
 
-    const removeBtn = document.createElement('button');
-    removeBtn.className = 'style-editor-button style-editor-button-remove';
-    removeBtn.textContent = 'Remove';
-    removeBtn.title = 'Remove layer from map';
-    removeBtn.addEventListener('click', (e) => {
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "style-editor-button style-editor-button-remove";
+    removeBtn.textContent = "Remove";
+    removeBtn.title = "Remove layer from map";
+    removeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       this.showRemoveConfirmation(editor, () => {
         this.closeStyleEditor(layerId);
@@ -2058,10 +2477,10 @@ export class LayerControl implements IControl {
       });
     });
 
-    const closeActionBtn = document.createElement('button');
-    closeActionBtn.className = 'style-editor-button style-editor-button-close';
-    closeActionBtn.textContent = 'Close';
-    closeActionBtn.addEventListener('click', (e) => {
+    const closeActionBtn = document.createElement("button");
+    closeActionBtn.className = "style-editor-button style-editor-button-close";
+    closeActionBtn.textContent = "Close";
+    closeActionBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       this.closeStyleEditor(layerId);
     });
@@ -2082,7 +2501,7 @@ export class LayerControl implements IControl {
    */
   private createNativeSubLayerStyleEditor(
     layerId: string,
-    nativeLayerIds: string[]
+    nativeLayerIds: string[],
   ): HTMLDivElement | null {
     // Group native layers by type
     const layersByType = new Map<string, string[]>();
@@ -2099,22 +2518,22 @@ export class LayerControl implements IControl {
 
     if (layersByType.size === 0) return null;
 
-    const editor = document.createElement('div');
-    editor.className = 'layer-control-style-editor';
+    const editor = document.createElement("div");
+    editor.className = "layer-control-style-editor";
 
     // Header
-    const header = document.createElement('div');
-    header.className = 'style-editor-header';
+    const header = document.createElement("div");
+    header.className = "style-editor-header";
 
-    const title = document.createElement('span');
-    title.className = 'style-editor-title';
-    title.textContent = 'Edit Style';
+    const title = document.createElement("span");
+    title.className = "style-editor-title";
+    title.textContent = "Edit Style";
 
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'style-editor-close';
-    closeBtn.innerHTML = '&times;';
-    closeBtn.title = 'Close';
-    closeBtn.addEventListener('click', (e) => {
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "style-editor-close";
+    closeBtn.innerHTML = "&times;";
+    closeBtn.title = "Close";
+    closeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       this.closeStyleEditor(layerId);
     });
@@ -2124,24 +2543,24 @@ export class LayerControl implements IControl {
     editor.appendChild(header);
 
     // Controls container
-    const controls = document.createElement('div');
-    controls.className = 'style-editor-controls';
+    const controls = document.createElement("div");
+    controls.className = "style-editor-controls";
 
     // Type display names
     const typeLabels: Record<string, string> = {
-      fill: 'Fill',
-      line: 'Line',
-      circle: 'Circle',
-      symbol: 'Symbol',
-      raster: 'Raster',
+      fill: "Fill",
+      line: "Line",
+      circle: "Circle",
+      symbol: "Symbol",
+      raster: "Raster",
     };
 
     // Add controls for each layer type, using the first native layer of that type
     for (const [type, ids] of layersByType) {
       // Add section header if there are multiple types
       if (layersByType.size > 1) {
-        const sectionHeader = document.createElement('div');
-        sectionHeader.className = 'style-editor-section-header';
+        const sectionHeader = document.createElement("div");
+        sectionHeader.className = "style-editor-section-header";
         sectionHeader.textContent = typeLabels[type] || type;
         controls.appendChild(sectionHeader);
       }
@@ -2153,13 +2572,13 @@ export class LayerControl implements IControl {
     }
 
     // Action buttons
-    const actions = document.createElement('div');
-    actions.className = 'style-editor-actions';
+    const actions = document.createElement("div");
+    actions.className = "style-editor-actions";
 
-    const resetBtn = document.createElement('button');
-    resetBtn.className = 'style-editor-button style-editor-button-reset';
-    resetBtn.textContent = 'Reset';
-    resetBtn.addEventListener('click', (e) => {
+    const resetBtn = document.createElement("button");
+    resetBtn.className = "style-editor-button style-editor-button-reset";
+    resetBtn.textContent = "Reset";
+    resetBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       // Reset all native sublayers
       for (const nativeId of nativeLayerIds) {
@@ -2170,11 +2589,11 @@ export class LayerControl implements IControl {
       this.openStyleEditor(layerId);
     });
 
-    const removeBtn = document.createElement('button');
-    removeBtn.className = 'style-editor-button style-editor-button-remove';
-    removeBtn.textContent = 'Remove';
-    removeBtn.title = 'Remove layer from map';
-    removeBtn.addEventListener('click', (e) => {
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "style-editor-button style-editor-button-remove";
+    removeBtn.textContent = "Remove";
+    removeBtn.title = "Remove layer from map";
+    removeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       this.showRemoveConfirmation(editor, () => {
         this.closeStyleEditor(layerId);
@@ -2182,10 +2601,10 @@ export class LayerControl implements IControl {
       });
     });
 
-    const closeActionBtn = document.createElement('button');
-    closeActionBtn.className = 'style-editor-button style-editor-button-close';
-    closeActionBtn.textContent = 'Close';
-    closeActionBtn.addEventListener('click', (e) => {
+    const closeActionBtn = document.createElement("button");
+    closeActionBtn.className = "style-editor-button style-editor-button-close";
+    closeActionBtn.textContent = "Close";
+    closeActionBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       this.closeStyleEditor(layerId);
     });
@@ -2208,7 +2627,7 @@ export class LayerControl implements IControl {
     container: HTMLElement,
     layerIds: string[],
     primaryLayerId: string,
-    layerType: string
+    layerType: string,
   ): void {
     // Register the group mapping so createColorControl/createSliderControl
     // will apply changes to all layers in the group
@@ -2242,22 +2661,22 @@ export class LayerControl implements IControl {
     const layer = this.map.getLayer(layerId);
     if (!layer) return null;
 
-    const editor = document.createElement('div');
-    editor.className = 'layer-control-style-editor';
+    const editor = document.createElement("div");
+    editor.className = "layer-control-style-editor";
 
     // Header
-    const header = document.createElement('div');
-    header.className = 'style-editor-header';
+    const header = document.createElement("div");
+    header.className = "style-editor-header";
 
-    const title = document.createElement('span');
-    title.className = 'style-editor-title';
-    title.textContent = 'Edit Style';
+    const title = document.createElement("span");
+    title.className = "style-editor-title";
+    title.textContent = "Edit Style";
 
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'style-editor-close';
-    closeBtn.innerHTML = '&times;';
-    closeBtn.title = 'Close';
-    closeBtn.addEventListener('click', (e) => {
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "style-editor-close";
+    closeBtn.innerHTML = "&times;";
+    closeBtn.title = "Close";
+    closeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       this.closeStyleEditor(layerId);
     });
@@ -2266,29 +2685,29 @@ export class LayerControl implements IControl {
     header.appendChild(closeBtn);
 
     // Controls container - populate based on layer type
-    const controls = document.createElement('div');
-    controls.className = 'style-editor-controls';
+    const controls = document.createElement("div");
+    controls.className = "style-editor-controls";
 
     const layerType = layer.type;
     this.addStyleControlsForLayerType(controls, layerId, layerType);
 
     // Action buttons
-    const actions = document.createElement('div');
-    actions.className = 'style-editor-actions';
+    const actions = document.createElement("div");
+    actions.className = "style-editor-actions";
 
-    const resetBtn = document.createElement('button');
-    resetBtn.className = 'style-editor-button style-editor-button-reset';
-    resetBtn.textContent = 'Reset';
-    resetBtn.addEventListener('click', (e) => {
+    const resetBtn = document.createElement("button");
+    resetBtn.className = "style-editor-button style-editor-button-reset";
+    resetBtn.textContent = "Reset";
+    resetBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       this.resetLayerStyle(layerId);
     });
 
-    const removeBtn = document.createElement('button');
-    removeBtn.className = 'style-editor-button style-editor-button-remove';
-    removeBtn.textContent = 'Remove';
-    removeBtn.title = 'Remove layer from map';
-    removeBtn.addEventListener('click', (e) => {
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "style-editor-button style-editor-button-remove";
+    removeBtn.textContent = "Remove";
+    removeBtn.title = "Remove layer from map";
+    removeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       this.showRemoveConfirmation(editor, () => {
         this.closeStyleEditor(layerId);
@@ -2296,10 +2715,10 @@ export class LayerControl implements IControl {
       });
     });
 
-    const closeActionBtn = document.createElement('button');
-    closeActionBtn.className = 'style-editor-button style-editor-button-close';
-    closeActionBtn.textContent = 'Close';
-    closeActionBtn.addEventListener('click', (e) => {
+    const closeActionBtn = document.createElement("button");
+    closeActionBtn.className = "style-editor-button style-editor-button-close";
+    closeActionBtn.textContent = "Close";
+    closeActionBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       this.closeStyleEditor(layerId);
     });
@@ -2318,21 +2737,25 @@ export class LayerControl implements IControl {
   /**
    * Add style controls based on layer type
    */
-  private addStyleControlsForLayerType(container: HTMLElement, layerId: string, layerType: string): void {
+  private addStyleControlsForLayerType(
+    container: HTMLElement,
+    layerId: string,
+    layerType: string,
+  ): void {
     switch (layerType) {
-      case 'fill':
+      case "fill":
         this.addFillControls(container, layerId);
         break;
-      case 'line':
+      case "line":
         this.addLineControls(container, layerId);
         break;
-      case 'circle':
+      case "circle":
         this.addCircleControls(container, layerId);
         break;
-      case 'raster':
+      case "raster":
         this.addRasterControls(container, layerId);
         break;
-      case 'symbol':
+      case "symbol":
         this.addSymbolControls(container, layerId);
         break;
       default:
@@ -2346,31 +2769,60 @@ export class LayerControl implements IControl {
   private addFillControls(container: HTMLElement, layerId: string): void {
     // Fill Color - try layer definition first, then runtime property
     const style = this.map.getStyle();
-    const layer = style.layers?.find(l => l.id === layerId);
+    const layer = style.layers?.find((l) => l.id === layerId);
     let fillColor: any = undefined;
 
     // First try to get from layer definition
-    if (layer && 'paint' in layer && layer.paint && 'fill-color' in layer.paint) {
-      fillColor = layer.paint['fill-color'];
+    if (
+      layer &&
+      "paint" in layer &&
+      layer.paint &&
+      "fill-color" in layer.paint
+    ) {
+      fillColor = layer.paint["fill-color"];
     }
 
     // Fallback to runtime property if not in definition
     if (!fillColor) {
-      fillColor = this.map.getPaintProperty(layerId, 'fill-color');
+      fillColor = this.map.getPaintProperty(layerId, "fill-color");
     }
 
-    this.createColorControl(container, layerId, 'fill-color', 'Fill Color', normalizeColor(fillColor || '#088'));
+    this.createColorControl(
+      container,
+      layerId,
+      "fill-color",
+      "Fill Color",
+      normalizeColor(fillColor || "#088"),
+    );
 
     // Fill Opacity
-    const fillOpacity = this.map.getPaintProperty(layerId, 'fill-opacity');
-    if (fillOpacity !== undefined && typeof fillOpacity === 'number') {
-      this.createSliderControl(container, layerId, 'fill-opacity', 'Fill Opacity', fillOpacity, 0, 1, 0.05);
+    const fillOpacity = this.map.getPaintProperty(layerId, "fill-opacity");
+    if (fillOpacity !== undefined && typeof fillOpacity === "number") {
+      this.createSliderControl(
+        container,
+        layerId,
+        "fill-opacity",
+        "Fill Opacity",
+        fillOpacity,
+        0,
+        1,
+        0.05,
+      );
     }
 
     // Fill Outline Color
-    const outlineColor = this.map.getPaintProperty(layerId, 'fill-outline-color');
+    const outlineColor = this.map.getPaintProperty(
+      layerId,
+      "fill-outline-color",
+    );
     if (outlineColor !== undefined) {
-      this.createColorControl(container, layerId, 'fill-outline-color', 'Outline Color', normalizeColor(outlineColor));
+      this.createColorControl(
+        container,
+        layerId,
+        "fill-outline-color",
+        "Outline Color",
+        normalizeColor(outlineColor),
+      );
     }
   }
 
@@ -2380,35 +2832,73 @@ export class LayerControl implements IControl {
   private addLineControls(container: HTMLElement, layerId: string): void {
     // Line Color - try layer definition first, then runtime property
     const style = this.map.getStyle();
-    const layer = style.layers?.find(l => l.id === layerId);
+    const layer = style.layers?.find((l) => l.id === layerId);
     let lineColor: any = undefined;
 
     // First try to get from layer definition
-    if (layer && 'paint' in layer && layer.paint && 'line-color' in layer.paint) {
-      lineColor = layer.paint['line-color'];
+    if (
+      layer &&
+      "paint" in layer &&
+      layer.paint &&
+      "line-color" in layer.paint
+    ) {
+      lineColor = layer.paint["line-color"];
     }
 
     // Fallback to runtime property if not in definition
     if (!lineColor) {
-      lineColor = this.map.getPaintProperty(layerId, 'line-color');
+      lineColor = this.map.getPaintProperty(layerId, "line-color");
     }
 
-    this.createColorControl(container, layerId, 'line-color', 'Line Color', normalizeColor(lineColor || '#000'));
+    this.createColorControl(
+      container,
+      layerId,
+      "line-color",
+      "Line Color",
+      normalizeColor(lineColor || "#000"),
+    );
 
     // Line Width
-    const lineWidth = this.map.getPaintProperty(layerId, 'line-width');
-    this.createSliderControl(container, layerId, 'line-width', 'Line Width', typeof lineWidth === 'number' ? lineWidth : 1, 0, 20, 0.5);
+    const lineWidth = this.map.getPaintProperty(layerId, "line-width");
+    this.createSliderControl(
+      container,
+      layerId,
+      "line-width",
+      "Line Width",
+      typeof lineWidth === "number" ? lineWidth : 1,
+      0,
+      20,
+      0.5,
+    );
 
     // Line Opacity
-    const lineOpacity = this.map.getPaintProperty(layerId, 'line-opacity');
-    if (lineOpacity !== undefined && typeof lineOpacity === 'number') {
-      this.createSliderControl(container, layerId, 'line-opacity', 'Line Opacity', lineOpacity, 0, 1, 0.05);
+    const lineOpacity = this.map.getPaintProperty(layerId, "line-opacity");
+    if (lineOpacity !== undefined && typeof lineOpacity === "number") {
+      this.createSliderControl(
+        container,
+        layerId,
+        "line-opacity",
+        "Line Opacity",
+        lineOpacity,
+        0,
+        1,
+        0.05,
+      );
     }
 
     // Line Blur
-    const lineBlur = this.map.getPaintProperty(layerId, 'line-blur');
-    if (lineBlur !== undefined && typeof lineBlur === 'number') {
-      this.createSliderControl(container, layerId, 'line-blur', 'Line Blur', lineBlur, 0, 5, 0.1);
+    const lineBlur = this.map.getPaintProperty(layerId, "line-blur");
+    if (lineBlur !== undefined && typeof lineBlur === "number") {
+      this.createSliderControl(
+        container,
+        layerId,
+        "line-blur",
+        "Line Blur",
+        lineBlur,
+        0,
+        5,
+        0.1,
+      );
     }
   }
 
@@ -2418,41 +2908,91 @@ export class LayerControl implements IControl {
   private addCircleControls(container: HTMLElement, layerId: string): void {
     // Circle Color - try layer definition first, then runtime property
     const style = this.map.getStyle();
-    const layer = style.layers?.find(l => l.id === layerId);
+    const layer = style.layers?.find((l) => l.id === layerId);
     let circleColor: any = undefined;
 
     // First try to get from layer definition
-    if (layer && 'paint' in layer && layer.paint && 'circle-color' in layer.paint) {
-      circleColor = layer.paint['circle-color'];
+    if (
+      layer &&
+      "paint" in layer &&
+      layer.paint &&
+      "circle-color" in layer.paint
+    ) {
+      circleColor = layer.paint["circle-color"];
     }
 
     // Fallback to runtime property if not in definition
     if (!circleColor) {
-      circleColor = this.map.getPaintProperty(layerId, 'circle-color');
+      circleColor = this.map.getPaintProperty(layerId, "circle-color");
     }
 
-    this.createColorControl(container, layerId, 'circle-color', 'Circle Color', normalizeColor(circleColor || '#000'));
+    this.createColorControl(
+      container,
+      layerId,
+      "circle-color",
+      "Circle Color",
+      normalizeColor(circleColor || "#000"),
+    );
 
     // Circle Radius
-    const circleRadius = this.map.getPaintProperty(layerId, 'circle-radius');
-    this.createSliderControl(container, layerId, 'circle-radius', 'Radius', typeof circleRadius === 'number' ? circleRadius : 5, 0, 40, 0.5);
+    const circleRadius = this.map.getPaintProperty(layerId, "circle-radius");
+    this.createSliderControl(
+      container,
+      layerId,
+      "circle-radius",
+      "Radius",
+      typeof circleRadius === "number" ? circleRadius : 5,
+      0,
+      40,
+      0.5,
+    );
 
     // Circle Opacity
-    const circleOpacity = this.map.getPaintProperty(layerId, 'circle-opacity');
-    if (circleOpacity !== undefined && typeof circleOpacity === 'number') {
-      this.createSliderControl(container, layerId, 'circle-opacity', 'Opacity', circleOpacity, 0, 1, 0.05);
+    const circleOpacity = this.map.getPaintProperty(layerId, "circle-opacity");
+    if (circleOpacity !== undefined && typeof circleOpacity === "number") {
+      this.createSliderControl(
+        container,
+        layerId,
+        "circle-opacity",
+        "Opacity",
+        circleOpacity,
+        0,
+        1,
+        0.05,
+      );
     }
 
     // Circle Stroke Color
-    const strokeColor = this.map.getPaintProperty(layerId, 'circle-stroke-color');
+    const strokeColor = this.map.getPaintProperty(
+      layerId,
+      "circle-stroke-color",
+    );
     if (strokeColor !== undefined) {
-      this.createColorControl(container, layerId, 'circle-stroke-color', 'Stroke Color', normalizeColor(strokeColor));
+      this.createColorControl(
+        container,
+        layerId,
+        "circle-stroke-color",
+        "Stroke Color",
+        normalizeColor(strokeColor),
+      );
     }
 
     // Circle Stroke Width
-    const strokeWidth = this.map.getPaintProperty(layerId, 'circle-stroke-width');
-    if (strokeWidth !== undefined && typeof strokeWidth === 'number') {
-      this.createSliderControl(container, layerId, 'circle-stroke-width', 'Stroke Width', strokeWidth, 0, 10, 0.1);
+    const strokeWidth = this.map.getPaintProperty(
+      layerId,
+      "circle-stroke-width",
+    );
+    if (strokeWidth !== undefined && typeof strokeWidth === "number") {
+      this.createSliderControl(
+        container,
+        layerId,
+        "circle-stroke-width",
+        "Stroke Width",
+        strokeWidth,
+        0,
+        10,
+        0.1,
+      );
     }
   }
 
@@ -2461,28 +3001,88 @@ export class LayerControl implements IControl {
    */
   private addRasterControls(container: HTMLElement, layerId: string): void {
     // Raster Opacity
-    const rasterOpacity = this.map.getPaintProperty(layerId, 'raster-opacity');
-    this.createSliderControl(container, layerId, 'raster-opacity', 'Opacity', typeof rasterOpacity === 'number' ? rasterOpacity : 1, 0, 1, 0.05);
+    const rasterOpacity = this.map.getPaintProperty(layerId, "raster-opacity");
+    this.createSliderControl(
+      container,
+      layerId,
+      "raster-opacity",
+      "Opacity",
+      typeof rasterOpacity === "number" ? rasterOpacity : 1,
+      0,
+      1,
+      0.05,
+    );
 
     // Raster Brightness Min
-    const brightnessMin = this.map.getPaintProperty(layerId, 'raster-brightness-min');
-    this.createSliderControl(container, layerId, 'raster-brightness-min', 'Brightness Min', typeof brightnessMin === 'number' ? brightnessMin : 0, -1, 1, 0.05);
+    const brightnessMin = this.map.getPaintProperty(
+      layerId,
+      "raster-brightness-min",
+    );
+    this.createSliderControl(
+      container,
+      layerId,
+      "raster-brightness-min",
+      "Brightness Min",
+      typeof brightnessMin === "number" ? brightnessMin : 0,
+      -1,
+      1,
+      0.05,
+    );
 
     // Raster Brightness Max
-    const brightnessMax = this.map.getPaintProperty(layerId, 'raster-brightness-max');
-    this.createSliderControl(container, layerId, 'raster-brightness-max', 'Brightness Max', typeof brightnessMax === 'number' ? brightnessMax : 1, -1, 1, 0.05);
+    const brightnessMax = this.map.getPaintProperty(
+      layerId,
+      "raster-brightness-max",
+    );
+    this.createSliderControl(
+      container,
+      layerId,
+      "raster-brightness-max",
+      "Brightness Max",
+      typeof brightnessMax === "number" ? brightnessMax : 1,
+      -1,
+      1,
+      0.05,
+    );
 
     // Raster Saturation
-    const saturation = this.map.getPaintProperty(layerId, 'raster-saturation');
-    this.createSliderControl(container, layerId, 'raster-saturation', 'Saturation', typeof saturation === 'number' ? saturation : 0, -1, 1, 0.05);
+    const saturation = this.map.getPaintProperty(layerId, "raster-saturation");
+    this.createSliderControl(
+      container,
+      layerId,
+      "raster-saturation",
+      "Saturation",
+      typeof saturation === "number" ? saturation : 0,
+      -1,
+      1,
+      0.05,
+    );
 
     // Raster Contrast
-    const contrast = this.map.getPaintProperty(layerId, 'raster-contrast');
-    this.createSliderControl(container, layerId, 'raster-contrast', 'Contrast', typeof contrast === 'number' ? contrast : 0, -1, 1, 0.05);
+    const contrast = this.map.getPaintProperty(layerId, "raster-contrast");
+    this.createSliderControl(
+      container,
+      layerId,
+      "raster-contrast",
+      "Contrast",
+      typeof contrast === "number" ? contrast : 0,
+      -1,
+      1,
+      0.05,
+    );
 
     // Raster Hue Rotate
-    const hueRotate = this.map.getPaintProperty(layerId, 'raster-hue-rotate');
-    this.createSliderControl(container, layerId, 'raster-hue-rotate', 'Hue Rotate', typeof hueRotate === 'number' ? hueRotate : 0, 0, 350, 5);
+    const hueRotate = this.map.getPaintProperty(layerId, "raster-hue-rotate");
+    this.createSliderControl(
+      container,
+      layerId,
+      "raster-hue-rotate",
+      "Hue Rotate",
+      typeof hueRotate === "number" ? hueRotate : 0,
+      0,
+      350,
+      5,
+    );
   }
 
   /**
@@ -2490,21 +3090,45 @@ export class LayerControl implements IControl {
    */
   private addSymbolControls(container: HTMLElement, layerId: string): void {
     // Text Color
-    const textColor = this.map.getPaintProperty(layerId, 'text-color');
+    const textColor = this.map.getPaintProperty(layerId, "text-color");
     if (textColor !== undefined) {
-      this.createColorControl(container, layerId, 'text-color', 'Text Color', normalizeColor(textColor));
+      this.createColorControl(
+        container,
+        layerId,
+        "text-color",
+        "Text Color",
+        normalizeColor(textColor),
+      );
     }
 
     // Text Opacity
-    const textOpacity = this.map.getPaintProperty(layerId, 'text-opacity');
-    if (textOpacity !== undefined && typeof textOpacity === 'number') {
-      this.createSliderControl(container, layerId, 'text-opacity', 'Text Opacity', textOpacity, 0, 1, 0.05);
+    const textOpacity = this.map.getPaintProperty(layerId, "text-opacity");
+    if (textOpacity !== undefined && typeof textOpacity === "number") {
+      this.createSliderControl(
+        container,
+        layerId,
+        "text-opacity",
+        "Text Opacity",
+        textOpacity,
+        0,
+        1,
+        0.05,
+      );
     }
 
     // Icon Opacity
-    const iconOpacity = this.map.getPaintProperty(layerId, 'icon-opacity');
-    if (iconOpacity !== undefined && typeof iconOpacity === 'number') {
-      this.createSliderControl(container, layerId, 'icon-opacity', 'Icon Opacity', iconOpacity, 0, 1, 0.05);
+    const iconOpacity = this.map.getPaintProperty(layerId, "icon-opacity");
+    if (iconOpacity !== undefined && typeof iconOpacity === "number") {
+      this.createSliderControl(
+        container,
+        layerId,
+        "icon-opacity",
+        "Icon Opacity",
+        iconOpacity,
+        0,
+        1,
+        0.05,
+      );
     }
   }
 
@@ -2516,31 +3140,31 @@ export class LayerControl implements IControl {
     layerId: string,
     property: string,
     label: string,
-    initialValue: string
+    initialValue: string,
   ): void {
-    const controlGroup = document.createElement('div');
-    controlGroup.className = 'style-control-group';
+    const controlGroup = document.createElement("div");
+    controlGroup.className = "style-control-group";
 
-    const labelEl = document.createElement('label');
-    labelEl.className = 'style-control-label';
+    const labelEl = document.createElement("label");
+    labelEl.className = "style-control-label";
     labelEl.textContent = label;
 
-    const inputWrapper = document.createElement('div');
-    inputWrapper.className = 'style-control-color-group';
+    const inputWrapper = document.createElement("div");
+    inputWrapper.className = "style-control-color-group";
 
-    const colorInput = document.createElement('input');
-    colorInput.type = 'color';
-    colorInput.className = 'style-control-color-picker';
+    const colorInput = document.createElement("input");
+    colorInput.type = "color";
+    colorInput.className = "style-control-color-picker";
     colorInput.value = initialValue;
     colorInput.dataset.property = property;
 
-    const hexDisplay = document.createElement('input');
-    hexDisplay.type = 'text';
-    hexDisplay.className = 'style-control-color-value';
+    const hexDisplay = document.createElement("input");
+    hexDisplay.type = "text";
+    hexDisplay.className = "style-control-color-value";
     hexDisplay.value = initialValue;
     hexDisplay.readOnly = true;
 
-    colorInput.addEventListener('input', () => {
+    colorInput.addEventListener("input", () => {
       const color = colorInput.value;
       hexDisplay.value = color;
       const targetIds = this.nativeLayerGroups.get(layerId) || [layerId];
@@ -2569,32 +3193,32 @@ export class LayerControl implements IControl {
     initialValue: number,
     min: number,
     max: number,
-    step: number
+    step: number,
   ): void {
-    const controlGroup = document.createElement('div');
-    controlGroup.className = 'style-control-group';
+    const controlGroup = document.createElement("div");
+    controlGroup.className = "style-control-group";
 
-    const labelEl = document.createElement('label');
-    labelEl.className = 'style-control-label';
+    const labelEl = document.createElement("label");
+    labelEl.className = "style-control-label";
     labelEl.textContent = label;
 
-    const inputWrapper = document.createElement('div');
-    inputWrapper.className = 'style-control-input-wrapper';
+    const inputWrapper = document.createElement("div");
+    inputWrapper.className = "style-control-input-wrapper";
 
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.className = 'style-control-slider';
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.className = "style-control-slider";
     slider.min = String(min);
     slider.max = String(max);
     slider.step = String(step);
     slider.value = String(initialValue);
     slider.dataset.property = property;
 
-    const valueDisplay = document.createElement('span');
-    valueDisplay.className = 'style-control-value';
+    const valueDisplay = document.createElement("span");
+    valueDisplay.className = "style-control-value";
     valueDisplay.textContent = formatNumericValue(initialValue, step);
 
-    slider.addEventListener('input', () => {
+    slider.addEventListener("input", () => {
       const value = parseFloat(slider.value);
       valueDisplay.textContent = formatNumericValue(value, step);
       const targetIds = this.nativeLayerGroups.get(layerId) || [layerId];
@@ -2626,15 +3250,19 @@ export class LayerControl implements IControl {
     const editor = this.styleEditors.get(layerId);
     if (editor) {
       // Update all slider controls
-      const sliders = editor.querySelectorAll('.style-control-slider') as NodeListOf<HTMLInputElement>;
-      sliders.forEach(slider => {
+      const sliders = editor.querySelectorAll(
+        ".style-control-slider",
+      ) as NodeListOf<HTMLInputElement>;
+      sliders.forEach((slider) => {
         const property = slider.dataset.property;
         if (property) {
           const value = this.map.getPaintProperty(layerId, property);
-          if (value !== undefined && typeof value === 'number') {
+          if (value !== undefined && typeof value === "number") {
             slider.value = String(value);
             // Update value display
-            const valueDisplay = slider.parentElement?.querySelector('.style-control-value');
+            const valueDisplay = slider.parentElement?.querySelector(
+              ".style-control-value",
+            );
             if (valueDisplay) {
               const step = parseFloat(slider.step);
               valueDisplay.textContent = formatNumericValue(value, step);
@@ -2644,8 +3272,10 @@ export class LayerControl implements IControl {
       });
 
       // Update all color controls
-      const colorPickers = editor.querySelectorAll('.style-control-color-picker') as NodeListOf<HTMLInputElement>;
-      colorPickers.forEach(picker => {
+      const colorPickers = editor.querySelectorAll(
+        ".style-control-color-picker",
+      ) as NodeListOf<HTMLInputElement>;
+      colorPickers.forEach((picker) => {
         const property = picker.dataset.property;
         if (property) {
           const value = this.map.getPaintProperty(layerId, property);
@@ -2653,7 +3283,9 @@ export class LayerControl implements IControl {
             const hexColor = normalizeColor(value);
             picker.value = hexColor;
             // Update hex display
-            const hexDisplay = picker.parentElement?.querySelector('.style-control-color-value');
+            const hexDisplay = picker.parentElement?.querySelector(
+              ".style-control-color-value",
+            );
             if (hexDisplay) {
               hexDisplay.textContent = hexColor;
             }
@@ -2671,7 +3303,7 @@ export class LayerControl implements IControl {
       return; // Don't update while user is dragging
     }
 
-    Object.keys(this.state.layerStates).forEach(layerId => {
+    Object.keys(this.state.layerStates).forEach((layerId) => {
       try {
         // Skip custom layers - they manage their own state via adapters
         if (this.state.layerStates[layerId]?.isCustomLayer) {
@@ -2679,7 +3311,7 @@ export class LayerControl implements IControl {
         }
 
         // Skip Background layer group
-        if (layerId === 'Background') {
+        if (layerId === "Background") {
           return;
         }
 
@@ -2687,8 +3319,8 @@ export class LayerControl implements IControl {
         if (!layer) return;
 
         // Check visibility
-        const visibility = this.map.getLayoutProperty(layerId, 'visibility');
-        const isVisible = visibility !== 'none';
+        const visibility = this.map.getLayoutProperty(layerId, "visibility");
+        const isVisible = visibility !== "none";
 
         // Get opacity
         const layerType = layer.type;
@@ -2711,13 +3343,21 @@ export class LayerControl implements IControl {
   /**
    * Update UI elements for a specific layer
    */
-  private updateUIForLayer(layerId: string, visible: boolean, opacity: number): void {
-    const layerItems = this.panel.querySelectorAll('.layer-control-item');
+  private updateUIForLayer(
+    layerId: string,
+    visible: boolean,
+    opacity: number,
+  ): void {
+    const layerItems = this.panel.querySelectorAll(".layer-control-item");
 
-    layerItems.forEach(item => {
+    layerItems.forEach((item) => {
       if ((item as HTMLElement).dataset.layerId === layerId) {
-        const checkbox = item.querySelector('.layer-control-checkbox') as HTMLInputElement;
-        const opacitySlider = item.querySelector('.layer-control-opacity') as HTMLInputElement;
+        const checkbox = item.querySelector(
+          ".layer-control-checkbox",
+        ) as HTMLInputElement;
+        const opacitySlider = item.querySelector(
+          ".layer-control-opacity",
+        ) as HTMLInputElement;
 
         if (checkbox) {
           checkbox.checked = visible;
@@ -2747,12 +3387,16 @@ export class LayerControl implements IControl {
         return;
       }
 
-      const currentMapLayerIds = new Set(style.layers.map(layer => layer.id));
+      const currentMapLayerIds = new Set(style.layers.map((layer) => layer.id));
 
       // Check if we're in auto-detect mode (no specific layers were specified)
-      const isAutoDetectMode = this.targetLayers.length === 0 ||
-        (this.targetLayers.length === 1 && this.targetLayers[0] === 'Background') ||
-        this.targetLayers.every(id => id === 'Background' || this.state.layerStates[id]);
+      const isAutoDetectMode =
+        this.targetLayers.length === 0 ||
+        (this.targetLayers.length === 1 &&
+          this.targetLayers[0] === "Background") ||
+        this.targetLayers.every(
+          (id) => id === "Background" || this.state.layerStates[id],
+        );
 
       // Find new layers that aren't in our state yet
       const newLayers: string[] = [];
@@ -2761,16 +3405,23 @@ export class LayerControl implements IControl {
       // 1. basemapLayerIds (from basemapStyleUrl) - most reliable
       // 2. initialLayerIds - layer NOT in initialLayerIds means it was added after control
       // 3. Source-based heuristics - fallback
-      const useBasemapStyleDetection = this.basemapLayerIds !== null && this.basemapLayerIds.size > 0;
-      const useInitialLayerDetection = !useBasemapStyleDetection && this.initialLayerIds !== null && this.initialLayerIds.size > 0;
+      const useBasemapStyleDetection =
+        this.basemapLayerIds !== null && this.basemapLayerIds.size > 0;
+      const useInitialLayerDetection =
+        !useBasemapStyleDetection &&
+        this.initialLayerIds !== null &&
+        this.initialLayerIds.size > 0;
 
-      currentMapLayerIds.forEach(layerId => {
-        if (layerId !== 'Background' && !this.state.layerStates[layerId]) {
+      currentMapLayerIds.forEach((layerId) => {
+        if (layerId !== "Background" && !this.state.layerStates[layerId]) {
           const layer = this.map.getLayer(layerId);
           if (layer) {
             // Always skip layers that were present when control was initialized
             // These are background/basemap layers and should stay grouped under "Background"
-            if (this.initialLayerIds !== null && this.initialLayerIds.has(layerId)) {
+            if (
+              this.initialLayerIds !== null &&
+              this.initialLayerIds.has(layerId)
+            ) {
               // Layer was in initial set - it's a background layer, skip it
               return;
             }
@@ -2826,22 +3477,28 @@ export class LayerControl implements IControl {
       // Find removed layers that are still in our state
       // Skip custom layers - they have their own removal mechanism via the adapter
       const removedLayers: string[] = [];
-      Object.keys(this.state.layerStates).forEach(layerId => {
+      Object.keys(this.state.layerStates).forEach((layerId) => {
         const state = this.state.layerStates[layerId];
         // Skip Background, custom layers, and layers still in the map
-        if (layerId !== 'Background' && !state.isCustomLayer && !currentMapLayerIds.has(layerId)) {
+        if (
+          layerId !== "Background" &&
+          !state.isCustomLayer &&
+          !currentMapLayerIds.has(layerId)
+        ) {
           removedLayers.push(layerId);
         }
       });
 
       // Remove deleted layers from UI and state
       if (removedLayers.length > 0) {
-        removedLayers.forEach(layerId => {
+        removedLayers.forEach((layerId) => {
           // Remove from state
           delete this.state.layerStates[layerId];
 
           // Remove from UI
-          const itemEl = this.panel.querySelector(`[data-layer-id="${layerId}"]`);
+          const itemEl = this.panel.querySelector(
+            `[data-layer-id="${layerId}"]`,
+          );
           if (itemEl) {
             itemEl.remove();
           }
@@ -2856,15 +3513,15 @@ export class LayerControl implements IControl {
 
       // Add UI for new layers
       if (newLayers.length > 0) {
-        newLayers.forEach(layerId => {
+        newLayers.forEach((layerId) => {
           const layer = this.map.getLayer(layerId);
           if (!layer) return;
 
           // Get layer type and opacity
           const layerType = layer.type;
           const opacity = getLayerOpacity(this.map, layerId, layerType);
-          const visibility = this.map.getLayoutProperty(layerId, 'visibility');
-          const isVisible = visibility !== 'none';
+          const visibility = this.map.getLayoutProperty(layerId, "visibility");
+          const isVisible = visibility !== "none";
 
           // Add to state
           this.state.layerStates[layerId] = {
@@ -2883,16 +3540,21 @@ export class LayerControl implements IControl {
         const customLayerIds = this.customLayerRegistry.getAllLayerIds();
 
         // Find new custom layers (skip ones explicitly removed by the user)
-        customLayerIds.forEach(layerId => {
-          if (!this.state.layerStates[layerId] && !this.removedCustomLayerIds.has(layerId)) {
-            const customState = this.customLayerRegistry!.getLayerState(layerId);
+        customLayerIds.forEach((layerId) => {
+          if (
+            !this.state.layerStates[layerId] &&
+            !this.removedCustomLayerIds.has(layerId)
+          ) {
+            const customState =
+              this.customLayerRegistry!.getLayerState(layerId);
             if (customState) {
               this.state.layerStates[layerId] = {
                 visible: customState.visible,
                 opacity: customState.opacity,
                 name: customState.name,
                 isCustomLayer: true,
-                customLayerType: this.customLayerRegistry!.getSymbolType(layerId) || undefined,
+                customLayerType:
+                  this.customLayerRegistry!.getSymbolType(layerId) || undefined,
               };
               this.addLayerItem(layerId, this.state.layerStates[layerId]);
             }
@@ -2900,14 +3562,16 @@ export class LayerControl implements IControl {
         });
 
         // Find removed custom layers
-        Object.keys(this.state.layerStates).forEach(layerId => {
+        Object.keys(this.state.layerStates).forEach((layerId) => {
           const state = this.state.layerStates[layerId];
           if (state.isCustomLayer && !customLayerIds.includes(layerId)) {
             // Remove from state
             delete this.state.layerStates[layerId];
 
             // Remove from UI
-            const itemEl = this.panel.querySelector(`[data-layer-id="${layerId}"]`);
+            const itemEl = this.panel.querySelector(
+              `[data-layer-id="${layerId}"]`,
+            );
             if (itemEl) {
               itemEl.remove();
             }
@@ -2921,7 +3585,7 @@ export class LayerControl implements IControl {
         });
       }
     } catch (error) {
-      console.warn('Failed to check for new layers:', error);
+      console.warn("Failed to check for new layers:", error);
     }
   }
 
@@ -2935,12 +3599,14 @@ export class LayerControl implements IControl {
     if (!this.customLayerRegistry) {
       this.customLayerRegistry = new CustomLayerRegistry();
       // Subscribe to registry changes
-      this.customLayerUnsubscribe = this.customLayerRegistry.onChange((event, layerId) => {
-        if (event === 'add' && layerId) {
-          this.removedCustomLayerIds.delete(layerId);
-        }
-        this.checkForNewLayers();
-      });
+      this.customLayerUnsubscribe = this.customLayerRegistry.onChange(
+        (event, layerId) => {
+          if (event === "add" && layerId) {
+            this.removedCustomLayerIds.delete(layerId);
+          }
+          this.checkForNewLayers();
+        },
+      );
     }
 
     // Register the adapter
@@ -2958,12 +3624,12 @@ export class LayerControl implements IControl {
    * Create context menu element
    */
   private createContextMenu(): HTMLDivElement {
-    const menu = document.createElement('div');
-    menu.className = 'layer-control-context-menu';
-    menu.style.display = 'none';
+    const menu = document.createElement("div");
+    menu.className = "layer-control-context-menu";
+    menu.style.display = "none";
 
     // Rename
-    const renameItem = this.createContextMenuItem('Rename', '✏️', () => {
+    const renameItem = this.createContextMenuItem("Rename", "✏️", () => {
       if (this.state.contextMenu.targetLayerId) {
         this.startRenaming(this.state.contextMenu.targetLayerId);
       }
@@ -2971,7 +3637,7 @@ export class LayerControl implements IControl {
     });
 
     // Zoom to layer
-    const zoomItem = this.createContextMenuItem('Zoom to Layer', '🔍', () => {
+    const zoomItem = this.createContextMenuItem("Zoom to Layer", "🔍", () => {
       if (this.state.contextMenu.targetLayerId) {
         this.zoomToLayer(this.state.contextMenu.targetLayerId);
       }
@@ -2979,11 +3645,11 @@ export class LayerControl implements IControl {
     });
 
     // Separator
-    const sep1 = document.createElement('div');
-    sep1.className = 'context-menu-separator';
+    const sep1 = document.createElement("div");
+    sep1.className = "context-menu-separator";
 
     // Move up
-    const moveUpItem = this.createContextMenuItem('Move Up', '↑', () => {
+    const moveUpItem = this.createContextMenuItem("Move Up", "↑", () => {
       if (this.state.contextMenu.targetLayerId) {
         this.moveLayerUp(this.state.contextMenu.targetLayerId);
       }
@@ -2991,7 +3657,7 @@ export class LayerControl implements IControl {
     });
 
     // Move to top
-    const moveTopItem = this.createContextMenuItem('Move to Top', '⤒', () => {
+    const moveTopItem = this.createContextMenuItem("Move to Top", "⤒", () => {
       if (this.state.contextMenu.targetLayerId) {
         this.moveLayerToTop(this.state.contextMenu.targetLayerId);
       }
@@ -2999,7 +3665,7 @@ export class LayerControl implements IControl {
     });
 
     // Move down
-    const moveDownItem = this.createContextMenuItem('Move Down', '↓', () => {
+    const moveDownItem = this.createContextMenuItem("Move Down", "↓", () => {
       if (this.state.contextMenu.targetLayerId) {
         this.moveLayerDown(this.state.contextMenu.targetLayerId);
       }
@@ -3007,24 +3673,33 @@ export class LayerControl implements IControl {
     });
 
     // Move to bottom
-    const moveBottomItem = this.createContextMenuItem('Move to Bottom', '⤓', () => {
-      if (this.state.contextMenu.targetLayerId) {
-        this.moveLayerToBottom(this.state.contextMenu.targetLayerId);
-      }
-      this.hideContextMenu();
-    });
+    const moveBottomItem = this.createContextMenuItem(
+      "Move to Bottom",
+      "⤓",
+      () => {
+        if (this.state.contextMenu.targetLayerId) {
+          this.moveLayerToBottom(this.state.contextMenu.targetLayerId);
+        }
+        this.hideContextMenu();
+      },
+    );
 
     // Separator
-    const sep2 = document.createElement('div');
-    sep2.className = 'context-menu-separator';
+    const sep2 = document.createElement("div");
+    sep2.className = "context-menu-separator";
 
     // Remove layer
-    const removeItem = this.createContextMenuItem('Remove Layer', '🗑️', () => {
-      if (this.state.contextMenu.targetLayerId) {
-        this.removeLayer(this.state.contextMenu.targetLayerId);
-      }
-      this.hideContextMenu();
-    }, true);
+    const removeItem = this.createContextMenuItem(
+      "Remove Layer",
+      "🗑️",
+      () => {
+        if (this.state.contextMenu.targetLayerId) {
+          this.removeLayer(this.state.contextMenu.targetLayerId);
+        }
+        this.hideContextMenu();
+      },
+      true,
+    );
 
     menu.appendChild(renameItem);
     menu.appendChild(zoomItem);
@@ -3046,23 +3721,24 @@ export class LayerControl implements IControl {
     label: string,
     icon: string,
     onClick: () => void,
-    isDanger = false
+    isDanger = false,
   ): HTMLDivElement {
-    const item = document.createElement('div');
-    item.className = 'context-menu-item' + (isDanger ? ' context-menu-item-danger' : '');
+    const item = document.createElement("div");
+    item.className =
+      "context-menu-item" + (isDanger ? " context-menu-item-danger" : "");
 
-    const iconEl = document.createElement('span');
-    iconEl.className = 'context-menu-item-icon';
+    const iconEl = document.createElement("span");
+    iconEl.className = "context-menu-item-icon";
     iconEl.textContent = icon;
 
-    const labelEl = document.createElement('span');
-    labelEl.className = 'context-menu-item-label';
+    const labelEl = document.createElement("span");
+    labelEl.className = "context-menu-item-label";
     labelEl.textContent = label;
 
     item.appendChild(iconEl);
     item.appendChild(labelEl);
 
-    item.addEventListener('click', (e) => {
+    item.addEventListener("click", (e) => {
       e.stopPropagation();
       onClick();
     });
@@ -3090,7 +3766,7 @@ export class LayerControl implements IControl {
     let menuY = y - mapRect.top;
 
     // Show menu to get dimensions
-    this.contextMenuEl.style.display = 'block';
+    this.contextMenuEl.style.display = "block";
 
     // Adjust if menu would go off screen
     const menuRect = this.contextMenuEl.getBoundingClientRect();
@@ -3118,7 +3794,7 @@ export class LayerControl implements IControl {
       y: 0,
     };
 
-    this.contextMenuEl.style.display = 'none';
+    this.contextMenuEl.style.display = "none";
   }
 
   /**
@@ -3128,19 +3804,20 @@ export class LayerControl implements IControl {
     const itemEl = this.panel.querySelector(`[data-layer-id="${layerId}"]`);
     if (!itemEl) return;
 
-    const nameEl = itemEl.querySelector('.layer-control-name');
+    const nameEl = itemEl.querySelector(".layer-control-name");
     if (!nameEl) return;
 
     this.state.renamingLayerId = layerId;
 
-    const currentName = this.state.customLayerNames.get(layerId) ||
+    const currentName =
+      this.state.customLayerNames.get(layerId) ||
       this.state.layerStates[layerId]?.name ||
       layerId;
 
     // Replace name span with input
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'layer-control-name-input';
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "layer-control-name-input";
     input.value = currentName;
 
     const finishRename = () => {
@@ -3156,8 +3833,8 @@ export class LayerControl implements IControl {
       }
 
       // Restore name span
-      const newNameEl = document.createElement('span');
-      newNameEl.className = 'layer-control-name';
+      const newNameEl = document.createElement("span");
+      newNameEl.className = "layer-control-name";
       newNameEl.textContent = newName;
       newNameEl.title = newName;
       input.replaceWith(newNameEl);
@@ -3165,16 +3842,16 @@ export class LayerControl implements IControl {
       this.state.renamingLayerId = null;
     };
 
-    input.addEventListener('blur', finishRename);
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
+    input.addEventListener("blur", finishRename);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
         e.preventDefault();
         finishRename();
-      } else if (e.key === 'Escape') {
+      } else if (e.key === "Escape") {
         e.preventDefault();
         // Restore original name
-        const newNameEl = document.createElement('span');
-        newNameEl.className = 'layer-control-name';
+        const newNameEl = document.createElement("span");
+        newNameEl.className = "layer-control-name";
         newNameEl.textContent = currentName;
         newNameEl.title = currentName;
         input.replaceWith(newNameEl);
@@ -3196,7 +3873,9 @@ export class LayerControl implements IControl {
     if (layerState?.isCustomLayer && this.customLayerRegistry) {
       const bounds = this.customLayerRegistry.getBounds(layerId);
       if (bounds) {
-        this.map.fitBounds(bounds as [number, number, number, number], { padding: 50 });
+        this.map.fitBounds(bounds as [number, number, number, number], {
+          padding: 50,
+        });
         return;
       }
     }
@@ -3218,13 +3897,16 @@ export class LayerControl implements IControl {
       if (features.length === 0) return;
 
       // Calculate bounds
-      let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+      let minLng = Infinity,
+        minLat = Infinity,
+        maxLng = -Infinity,
+        maxLat = -Infinity;
 
-      features.forEach(feature => {
+      features.forEach((feature) => {
         if (!feature.geometry) return;
 
         const processCoords = (coords: any) => {
-          if (typeof coords[0] === 'number') {
+          if (typeof coords[0] === "number") {
             const [lng, lat] = coords;
             minLng = Math.min(minLng, lng);
             minLat = Math.min(minLat, lat);
@@ -3235,21 +3917,40 @@ export class LayerControl implements IControl {
           }
         };
 
-        if (feature.geometry.type === 'Point') {
+        if (feature.geometry.type === "Point") {
           processCoords((feature.geometry as any).coordinates);
-        } else if (feature.geometry.type === 'LineString' || feature.geometry.type === 'MultiPoint') {
+        } else if (
+          feature.geometry.type === "LineString" ||
+          feature.geometry.type === "MultiPoint"
+        ) {
           (feature.geometry as any).coordinates.forEach(processCoords);
-        } else if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiLineString') {
-          (feature.geometry as any).coordinates.forEach((ring: any) => ring.forEach(processCoords));
-        } else if (feature.geometry.type === 'MultiPolygon') {
+        } else if (
+          feature.geometry.type === "Polygon" ||
+          feature.geometry.type === "MultiLineString"
+        ) {
+          (feature.geometry as any).coordinates.forEach((ring: any) =>
+            ring.forEach(processCoords),
+          );
+        } else if (feature.geometry.type === "MultiPolygon") {
           (feature.geometry as any).coordinates.forEach((polygon: any) =>
-            polygon.forEach((ring: any) => ring.forEach(processCoords))
+            polygon.forEach((ring: any) => ring.forEach(processCoords)),
           );
         }
       });
 
-      if (minLng !== Infinity && minLat !== Infinity && maxLng !== -Infinity && maxLat !== -Infinity) {
-        this.map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 50 });
+      if (
+        minLng !== Infinity &&
+        minLat !== Infinity &&
+        maxLng !== -Infinity &&
+        maxLat !== -Infinity
+      ) {
+        this.map.fitBounds(
+          [
+            [minLng, minLat],
+            [maxLng, maxLat],
+          ],
+          { padding: 50 },
+        );
       }
     } catch (error) {
       console.warn(`Failed to zoom to layer ${layerId}:`, error);
@@ -3265,20 +3966,26 @@ export class LayerControl implements IControl {
     if (!style?.layers) return [];
 
     // Get map layers in their actual order (low index = rendered first/bottom)
-    const mapLayerIds = style.layers.map(l => l.id);
+    const mapLayerIds = style.layers.map((l) => l.id);
 
     // Filter to only user layers that are in our state
-    const userLayerIds = Object.keys(this.state.layerStates).filter(id => id !== 'Background');
+    const userLayerIds = Object.keys(this.state.layerStates).filter(
+      (id) => id !== "Background",
+    );
 
     // Separate MapLibre layers and custom layers
-    const mapLibreLayers = userLayerIds.filter(id => mapLayerIds.includes(id));
-    const customLayers = userLayerIds.filter(id =>
-      this.state.layerStates[id]?.isCustomLayer && !mapLayerIds.includes(id)
+    const mapLibreLayers = userLayerIds.filter((id) =>
+      mapLayerIds.includes(id),
+    );
+    const customLayers = userLayerIds.filter(
+      (id) =>
+        this.state.layerStates[id]?.isCustomLayer && !mapLayerIds.includes(id),
     );
 
     // Sort MapLibre layers by map order (reversed: high index = top in UI)
-    const sortedMapLibreLayers = mapLibreLayers
-      .sort((a, b) => mapLayerIds.indexOf(b) - mapLayerIds.indexOf(a));
+    const sortedMapLibreLayers = mapLibreLayers.sort(
+      (a, b) => mapLayerIds.indexOf(b) - mapLayerIds.indexOf(a),
+    );
 
     // Custom layers are placed at the top (rendered last/on top)
     // Maintain their relative order from the state
@@ -3299,8 +4006,16 @@ export class LayerControl implements IControl {
    * @param direction 1 for forward (toward bottom), -1 for backward (toward top)
    * @returns MapLibre layer ID or undefined if not found
    */
-  private findNextMapLibreLayer(layerIds: string[], startIndex: number, direction: 1 | -1): string | undefined {
-    for (let i = startIndex; direction === 1 ? i < layerIds.length : i >= 0; i += direction) {
+  private findNextMapLibreLayer(
+    layerIds: string[],
+    startIndex: number,
+    direction: 1 | -1,
+  ): string | undefined {
+    for (
+      let i = startIndex;
+      direction === 1 ? i < layerIds.length : i >= 0;
+      i += direction
+    ) {
       if (this.isMapLibreLayer(layerIds[i])) {
         return layerIds[i];
       }
@@ -3328,9 +4043,10 @@ export class LayerControl implements IControl {
       try {
         // Find the MapLibre layer to move before (2 positions above if exists)
         // If moving to top, use undefined as beforeId
-        const targetBeforeId = index >= 2
-          ? this.findNextMapLibreLayer(layerIds, index - 2, -1)
-          : undefined;
+        const targetBeforeId =
+          index >= 2
+            ? this.findNextMapLibreLayer(layerIds, index - 2, -1)
+            : undefined;
         this.map.moveLayer(layerId, targetBeforeId);
       } catch (e) {
         // Ignore errors
@@ -3341,13 +4057,16 @@ export class LayerControl implements IControl {
     // Swap positions in the state
     const newLayerStates: { [key: string]: LayerState } = {};
     const orderedIds = [...layerIds];
-    [orderedIds[index], orderedIds[index - 1]] = [orderedIds[index - 1], orderedIds[index]];
+    [orderedIds[index], orderedIds[index - 1]] = [
+      orderedIds[index - 1],
+      orderedIds[index],
+    ];
 
     // Add Background first if it exists
-    if (this.state.layerStates['Background']) {
-      newLayerStates['Background'] = this.state.layerStates['Background'];
+    if (this.state.layerStates["Background"]) {
+      newLayerStates["Background"] = this.state.layerStates["Background"];
     }
-    orderedIds.forEach(id => {
+    orderedIds.forEach((id) => {
       if (this.state.layerStates[id]) {
         newLayerStates[id] = this.state.layerStates[id];
       }
@@ -3386,10 +4105,10 @@ export class LayerControl implements IControl {
     orderedIds.unshift(layerId);
 
     // Add Background first if it exists
-    if (this.state.layerStates['Background']) {
-      newLayerStates['Background'] = this.state.layerStates['Background'];
+    if (this.state.layerStates["Background"]) {
+      newLayerStates["Background"] = this.state.layerStates["Background"];
     }
-    orderedIds.forEach(id => {
+    orderedIds.forEach((id) => {
       if (this.state.layerStates[id]) {
         newLayerStates[id] = this.state.layerStates[id];
       }
@@ -3431,13 +4150,16 @@ export class LayerControl implements IControl {
     // Update internal order - swap positions
     const newLayerStates: { [key: string]: LayerState } = {};
     const orderedIds = [...layerIds];
-    [orderedIds[index], orderedIds[index + 1]] = [orderedIds[index + 1], orderedIds[index]];
+    [orderedIds[index], orderedIds[index + 1]] = [
+      orderedIds[index + 1],
+      orderedIds[index],
+    ];
 
     // Add Background first if it exists
-    if (this.state.layerStates['Background']) {
-      newLayerStates['Background'] = this.state.layerStates['Background'];
+    if (this.state.layerStates["Background"]) {
+      newLayerStates["Background"] = this.state.layerStates["Background"];
     }
-    orderedIds.forEach(id => {
+    orderedIds.forEach((id) => {
       if (this.state.layerStates[id]) {
         newLayerStates[id] = this.state.layerStates[id];
       }
@@ -3465,7 +4187,11 @@ export class LayerControl implements IControl {
     if (!isCustom && this.isMapLibreLayer(layerId)) {
       // The bottom layer in UI has the lowest z-index among user layers
       // Find the bottom-most MapLibre layer
-      const bottomLayerId = this.findNextMapLibreLayer(layerIds, layerIds.length - 1, -1);
+      const bottomLayerId = this.findNextMapLibreLayer(
+        layerIds,
+        layerIds.length - 1,
+        -1,
+      );
 
       if (bottomLayerId && bottomLayerId !== layerId) {
         try {
@@ -3484,10 +4210,10 @@ export class LayerControl implements IControl {
     orderedIds.push(layerId);
 
     // Add Background first if it exists
-    if (this.state.layerStates['Background']) {
-      newLayerStates['Background'] = this.state.layerStates['Background'];
+    if (this.state.layerStates["Background"]) {
+      newLayerStates["Background"] = this.state.layerStates["Background"];
     }
-    orderedIds.forEach(id => {
+    orderedIds.forEach((id) => {
       if (this.state.layerStates[id]) {
         newLayerStates[id] = this.state.layerStates[id];
       }
@@ -3505,19 +4231,19 @@ export class LayerControl implements IControl {
    */
   private showRemoveConfirmation(
     container: HTMLElement,
-    onConfirm: () => void
+    onConfirm: () => void,
   ): void {
     // Remove any existing confirmation in this container
-    const existing = container.querySelector('.layer-control-remove-confirm');
+    const existing = container.querySelector(".layer-control-remove-confirm");
     if (existing) {
       existing.remove();
     }
 
-    const confirmEl = document.createElement('div');
-    confirmEl.className = 'layer-control-remove-confirm';
+    const confirmEl = document.createElement("div");
+    confirmEl.className = "layer-control-remove-confirm";
 
-    const message = document.createElement('div');
-    message.className = 'layer-control-remove-confirm-message';
+    const message = document.createElement("div");
+    message.className = "layer-control-remove-confirm-message";
     message.innerHTML = `
       <svg class="layer-control-remove-confirm-icon" viewBox="0 0 20 20" fill="currentColor">
         <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"/>
@@ -3525,21 +4251,23 @@ export class LayerControl implements IControl {
       <span>Remove this layer?</span>
     `;
 
-    const buttons = document.createElement('div');
-    buttons.className = 'layer-control-remove-confirm-buttons';
+    const buttons = document.createElement("div");
+    buttons.className = "layer-control-remove-confirm-buttons";
 
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'layer-control-remove-confirm-btn layer-control-remove-confirm-btn-cancel';
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.addEventListener('click', (e) => {
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className =
+      "layer-control-remove-confirm-btn layer-control-remove-confirm-btn-cancel";
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       confirmEl.remove();
     });
 
-    const confirmBtn = document.createElement('button');
-    confirmBtn.className = 'layer-control-remove-confirm-btn layer-control-remove-confirm-btn-confirm';
-    confirmBtn.textContent = 'Remove';
-    confirmBtn.addEventListener('click', (e) => {
+    const confirmBtn = document.createElement("button");
+    confirmBtn.className =
+      "layer-control-remove-confirm-btn layer-control-remove-confirm-btn-confirm";
+    confirmBtn.textContent = "Remove";
+    confirmBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       confirmEl.remove();
       onConfirm();
@@ -3555,7 +4283,7 @@ export class LayerControl implements IControl {
 
     // Scroll the confirmation into view
     requestAnimationFrame(() => {
-      confirmEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      confirmEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
     });
   }
 
@@ -3591,7 +4319,9 @@ export class LayerControl implements IControl {
         // Check if source is still used by other layers
         if (sourceId) {
           const style = this.map.getStyle();
-          const sourceStillUsed = style?.layers?.some(l => (l as any).source === sourceId);
+          const sourceStillUsed = style?.layers?.some(
+            (l) => (l as any).source === sourceId,
+          );
           if (!sourceStillUsed) {
             try {
               this.map.removeSource(sourceId);
@@ -3630,8 +4360,8 @@ export class LayerControl implements IControl {
    * Create drag handle element
    */
   private createDragHandle(layerId: string): HTMLDivElement {
-    const handle = document.createElement('div');
-    handle.className = 'layer-control-drag-handle';
+    const handle = document.createElement("div");
+    handle.className = "layer-control-drag-handle";
     handle.innerHTML = `<svg viewBox="0 0 16 16" fill="currentColor">
       <circle cx="5" cy="3" r="1.5"/>
       <circle cx="11" cy="3" r="1.5"/>
@@ -3640,10 +4370,10 @@ export class LayerControl implements IControl {
       <circle cx="5" cy="13" r="1.5"/>
       <circle cx="11" cy="13" r="1.5"/>
     </svg>`;
-    handle.title = 'Drag to reorder';
+    handle.title = "Drag to reorder";
 
     // Pointer events for dragging
-    handle.addEventListener('pointerdown', (e) => {
+    handle.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       e.stopPropagation();
       this.startDrag(layerId, e);
@@ -3656,8 +4386,9 @@ export class LayerControl implements IControl {
    * Create a disabled drag handle for alignment (used for Background layer)
    */
   private createDisabledDragHandle(): HTMLDivElement {
-    const handle = document.createElement('div');
-    handle.className = 'layer-control-drag-handle layer-control-drag-handle-disabled';
+    const handle = document.createElement("div");
+    handle.className =
+      "layer-control-drag-handle layer-control-drag-handle-disabled";
     handle.innerHTML = `<svg viewBox="0 0 16 16" fill="currentColor">
       <circle cx="5" cy="3" r="1.5"/>
       <circle cx="11" cy="3" r="1.5"/>
@@ -3673,7 +4404,9 @@ export class LayerControl implements IControl {
    * Start dragging a layer
    */
   private startDrag(layerId: string, e: PointerEvent): void {
-    const itemEl = this.panel.querySelector(`[data-layer-id="${layerId}"]`) as HTMLElement;
+    const itemEl = this.panel.querySelector(
+      `[data-layer-id="${layerId}"]`,
+    ) as HTMLElement;
     if (!itemEl) return;
 
     // Get item rect before any modifications
@@ -3690,22 +4423,22 @@ export class LayerControl implements IControl {
     };
 
     // Add dragging class to panel
-    this.panel.classList.add('dragging-active');
+    this.panel.classList.add("dragging-active");
 
     // Hide original first (before creating clone to avoid visual jump)
-    itemEl.classList.add('dragging');
+    itemEl.classList.add("dragging");
 
     // Create placeholder at original position
-    const placeholder = document.createElement('div');
-    placeholder.className = 'layer-control-drop-placeholder';
+    const placeholder = document.createElement("div");
+    placeholder.className = "layer-control-drop-placeholder";
     placeholder.style.height = `${rect.height}px`;
     itemEl.parentNode?.insertBefore(placeholder, itemEl);
     this.state.drag.placeholder = placeholder;
 
     // Create floating clone
     const clone = itemEl.cloneNode(true) as HTMLElement;
-    clone.classList.remove('dragging');
-    clone.className = 'layer-control-item layer-control-item-dragging';
+    clone.classList.remove("dragging");
+    clone.className = "layer-control-item layer-control-item-dragging";
     clone.style.width = `${rect.width}px`;
     clone.style.left = `${rect.left}px`;
     clone.style.top = `${rect.top}px`;
@@ -3715,15 +4448,15 @@ export class LayerControl implements IControl {
     // Set up move and end handlers on document
     const onMove = (moveE: PointerEvent) => this.onDragMove(moveE);
     const onEnd = (endE: PointerEvent) => {
-      document.removeEventListener('pointermove', onMove);
-      document.removeEventListener('pointerup', onEnd);
-      document.removeEventListener('pointercancel', onEnd);
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onEnd);
+      document.removeEventListener("pointercancel", onEnd);
       this.endDrag(endE);
     };
 
-    document.addEventListener('pointermove', onMove);
-    document.addEventListener('pointerup', onEnd);
-    document.addEventListener('pointercancel', onEnd);
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onEnd);
+    document.addEventListener("pointercancel", onEnd);
   }
 
   /**
@@ -3744,8 +4477,11 @@ export class LayerControl implements IControl {
     this.state.drag.currentY = e.clientY;
 
     // Get all layer items (excluding the one being dragged and Background)
-    const items = Array.from(this.panel.querySelectorAll('.layer-control-item:not(.dragging)'))
-      .filter(item => (item as HTMLElement).dataset.layerId !== 'Background') as HTMLElement[];
+    const items = Array.from(
+      this.panel.querySelectorAll(".layer-control-item:not(.dragging)"),
+    ).filter(
+      (item) => (item as HTMLElement).dataset.layerId !== "Background",
+    ) as HTMLElement[];
 
     // Find which item we're hovering over
     for (const item of items) {
@@ -3781,12 +4517,14 @@ export class LayerControl implements IControl {
     const placeholder = this.state.drag.placeholder;
 
     // Get the original item
-    const itemEl = this.panel.querySelector(`[data-layer-id="${layerId}"]`) as HTMLElement;
+    const itemEl = this.panel.querySelector(
+      `[data-layer-id="${layerId}"]`,
+    ) as HTMLElement;
 
     if (itemEl && placeholder) {
       // Move item to placeholder position
       placeholder.parentNode?.insertBefore(itemEl, placeholder);
-      itemEl.classList.remove('dragging');
+      itemEl.classList.remove("dragging");
     }
 
     // Clean up
@@ -3811,12 +4549,14 @@ export class LayerControl implements IControl {
     }
 
     // Remove dragging class from panel
-    this.panel.classList.remove('dragging-active');
+    this.panel.classList.remove("dragging-active");
 
     // Remove dragging class from any items
-    this.panel.querySelectorAll('.layer-control-item.dragging').forEach(el => {
-      el.classList.remove('dragging');
-    });
+    this.panel
+      .querySelectorAll(".layer-control-item.dragging")
+      .forEach((el) => {
+        el.classList.remove("dragging");
+      });
 
     // Reset drag state
     this.state.drag = {
@@ -3838,12 +4578,12 @@ export class LayerControl implements IControl {
     this.state.isStyleOperationInProgress = true;
 
     // Get layer items in current UI order
-    const items = this.panel.querySelectorAll('.layer-control-item');
+    const items = this.panel.querySelectorAll(".layer-control-item");
     const uiLayerIds: string[] = [];
 
-    items.forEach(item => {
+    items.forEach((item) => {
       const layerId = (item as HTMLElement).dataset.layerId;
-      if (layerId && layerId !== 'Background') {
+      if (layerId && layerId !== "Background") {
         uiLayerIds.push(layerId);
       }
     });
@@ -3854,7 +4594,7 @@ export class LayerControl implements IControl {
 
     // Build a set of MapLibre layer IDs for quick lookup
     const style = this.map.getStyle();
-    const mapLibreLayerIds = new Set(style?.layers?.map(l => l.id) || []);
+    const mapLibreLayerIds = new Set(style?.layers?.map((l) => l.id) || []);
 
     // Move each layer to its correct position
     for (let i = 0; i < reversedIds.length; i++) {
