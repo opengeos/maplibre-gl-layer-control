@@ -178,7 +178,7 @@ function MapComponent() {
 | `basemapStyleUrl` | `string` | `undefined` | URL of basemap style JSON for reliable layer detection (see below) |
 | `enableBackgroundPresets` | `boolean` | `true` | Show the "Saved configurations" controls in the Background Layers panel |
 | `backgroundPresetStorageKey` | `string` | `'maplibre-layer-control:background-presets'` | `localStorage` key under which background visibility presets are stored |
-| `onBackgroundPresetsChange` | `(presets: BackgroundPresets) => void` | `undefined` | Called whenever presets are created, applied, or deleted |
+| `onBackgroundPresetsChange` | `(presets: BackgroundPresets) => void` | `undefined` | Called whenever the saved preset set changes (created or deleted); applying a preset does not change the set, so it does not fire |
 
 ### LayerState
 

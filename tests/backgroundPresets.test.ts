@@ -138,6 +138,28 @@ describe('background presets', () => {
     expect(control.getBackgroundPresets()).toEqual({});
   });
 
+  it('rejects unsafe preset names that could pollute the prototype', () => {
+    const { control } = makeControl({ water: true });
+    for (const unsafe of ['__proto__', 'constructor', 'prototype']) {
+      control.saveBackgroundPreset(unsafe);
+    }
+    expect(control.getBackgroundPresets()).toEqual({});
+    // Inherited names must not produce false-positive apply/delete results.
+    expect(control.applyBackgroundPreset('toString')).toBe(false);
+    expect(control.deleteBackgroundPreset('toString')).toEqual({});
+  });
+
+  it('drops unsafe keys when reading hand-crafted stored JSON', () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      '{"__proto__":{"polluted":true},"safe":{"water":false}}',
+    );
+    const { control } = makeControl({ water: true });
+    const presets = control.getBackgroundPresets();
+    expect(presets).toEqual({ safe: { water: false } });
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
   it('fires the change callback when presets mutate', () => {
     const calls: number[] = [];
     const control = new LayerControl({
@@ -158,6 +180,8 @@ describe('background presets', () => {
     /* eslint-enable @typescript-eslint/no-explicit-any */
 
     control.saveBackgroundPreset('one');
+    // Applying a preset does not change the stored set, so it must not fire.
+    control.applyBackgroundPreset('one');
     control.deleteBackgroundPreset('one');
     expect(calls).toEqual([1, 0]);
   });

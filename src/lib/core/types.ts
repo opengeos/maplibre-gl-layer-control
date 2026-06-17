@@ -158,7 +158,8 @@ export interface LayerControlOptions {
   backgroundPresetStorageKey?: string;
   /**
    * Callback fired whenever the set of saved background presets changes
-   * (created, applied, or deleted). Receives the full preset map.
+   * (created or deleted). Receives the full preset map. Applying a preset does
+   * not change the stored set, so it does not trigger this callback.
    */
   onBackgroundPresetsChange?: (presets: BackgroundPresets) => void;
 }

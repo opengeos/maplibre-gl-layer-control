@@ -2514,10 +2514,29 @@ export class LayerControl implements IControl {
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
         return {};
       }
-      return parsed as BackgroundPresets;
+      // Keep only safe, own keys mapping to plain objects, so a hand-crafted
+      // storage value cannot smuggle in dangerous keys (e.g. `__proto__`).
+      const presets: BackgroundPresets = {};
+      for (const [name, value] of Object.entries(parsed)) {
+        if (this.isUnsafePresetKey(name)) continue;
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+          presets[name] = value as BackgroundLayerVisibility;
+        }
+      }
+      return presets;
     } catch {
       return {};
     }
+  }
+
+  /**
+   * Reject preset names that, used as object keys, could pollute the prototype
+   * chain or otherwise alias built-in object members.
+   */
+  private isUnsafePresetKey(name: string): boolean {
+    return (
+      name === "__proto__" || name === "constructor" || name === "prototype"
+    );
   }
 
   /**
@@ -2548,7 +2567,7 @@ export class LayerControl implements IControl {
   saveBackgroundPreset(name: string): BackgroundPresets {
     const trimmed = name.trim();
     const presets = this.getBackgroundPresets();
-    if (!trimmed) return presets;
+    if (!trimmed || this.isUnsafePresetKey(trimmed)) return presets;
     presets[trimmed] = this.getBackgroundLayerVisibility();
     this.writeBackgroundPresets(presets);
     return presets;
@@ -2562,9 +2581,8 @@ export class LayerControl implements IControl {
    */
   applyBackgroundPreset(name: string): boolean {
     const presets = this.getBackgroundPresets();
-    const preset = presets[name];
-    if (!preset) return false;
-    this.applyBackgroundLayerVisibility(preset);
+    if (!Object.prototype.hasOwnProperty.call(presets, name)) return false;
+    this.applyBackgroundLayerVisibility(presets[name]);
     return true;
   }
 
@@ -2576,7 +2594,7 @@ export class LayerControl implements IControl {
    */
   deleteBackgroundPreset(name: string): BackgroundPresets {
     const presets = this.getBackgroundPresets();
-    if (name in presets) {
+    if (Object.prototype.hasOwnProperty.call(presets, name)) {
       delete presets[name];
       this.writeBackgroundPresets(presets);
     }
