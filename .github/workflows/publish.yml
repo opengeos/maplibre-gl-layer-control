@@ -3,6 +3,14 @@ name: Publish to npm
 on:
   release:
     types: [created]
+  # Allow re-publishing the current package.json version manually (e.g. if a
+  # release-triggered run needs to be retried).
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Required for npm Trusted Publishing (OIDC) — no NPM_TOKEN needed.
+  id-token: write
 
 jobs:
   publish:
@@ -11,8 +19,13 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '22'
           registry-url: 'https://registry.npmjs.org'
+
+      # Trusted Publishing requires npm >= 11.5.1, newer than the version
+      # bundled with Node 22.
+      - name: Update npm
+        run: npm install -g npm@latest
 
       - name: Install dependencies
         run: npm ci
@@ -23,7 +36,8 @@ jobs:
       - name: Build
         run: npm run build
 
+      # No NODE_AUTH_TOKEN: authentication is via OIDC Trusted Publishing,
+      # configured for this package + workflow on npmjs.com. Provenance is
+      # generated and attached automatically.
       - name: Publish to npm
         run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
