@@ -40,13 +40,6 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: OIDC diagnostics
-        run: |
-          echo "node: $(node -v)"
-          echo "npm:  $(npm -v)"
-          echo "ID token request URL present: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}${ACTIONS_ID_TOKEN_REQUEST_URL:-NO}"
-          echo "ID token request token present: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+yes}${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-NO}"
-
       # No NODE_AUTH_TOKEN: authentication is via OIDC Trusted Publishing,
       # configured for this package + workflow on npmjs.com. Provenance is
       # generated and attached automatically.
