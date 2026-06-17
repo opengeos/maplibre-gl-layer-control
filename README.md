@@ -24,6 +24,7 @@ A comprehensive layer control for MapLibre GL with advanced styling capabilities
 - ✅ **Dynamic layer detection** - Automatically detect and manage new layers
 - ✅ **Background layer grouping** - Control all basemap layers as one group
 - ✅ **Background layer legend** - Gear icon to toggle individual background layer visibility
+- ✅ **Saved configurations** - Save the current basemap element visibility as a named preset and re-apply it with one click; presets persist across sessions and projects via `localStorage`
 - ✅ **Accessibility** - Full ARIA support and keyboard navigation
 - ✅ **TypeScript** - Full type safety and IntelliSense support
 - ✅ **React integration** - Optional React components and hooks
@@ -175,6 +176,9 @@ function MapComponent() {
 | `excludeLayers` | `string[]` | `undefined` | Array of wildcard patterns to exclude layers by name (e.g., `['*-temp-*', 'debug-*']`) |
 | `customLayerAdapters` | `CustomLayerAdapter[]` | `undefined` | Adapters for non-MapLibre layers (deck.gl, Zarr, etc.) |
 | `basemapStyleUrl` | `string` | `undefined` | URL of basemap style JSON for reliable layer detection (see below) |
+| `enableBackgroundPresets` | `boolean` | `true` | Show the "Saved configurations" controls in the Background Layers panel |
+| `backgroundPresetStorageKey` | `string` | `'maplibre-layer-control:background-presets'` | `localStorage` key under which background visibility presets are stored |
+| `onBackgroundPresetsChange` | `(presets: BackgroundPresets) => void` | `undefined` | Called whenever presets are created, applied, or deleted |
 
 ### LayerState
 
@@ -293,8 +297,30 @@ When using the `layers` option to specify specific layers, all other layers are 
 - Quick "Show All" / "Hide All" buttons
 - **"Only rendered" filter** - Shows only layers that are currently rendered in the map viewport
 - Indeterminate checkbox state when some layers are hidden
+- **Saved configurations** - Save the current set of visibility toggles as a named preset and re-apply it later with one click
 
 This allows fine-grained control over which basemap layers are visible while maintaining a simplified layer control interface.
+
+#### Saved configurations (presets)
+
+The Background Layers panel includes a **Saved configurations** section that lets users save the current basemap element visibility as a named preset and re-apply it with a single click. Presets are stored in `localStorage`, so they persist across page reloads and apply to any project that uses the same basemap layers. Toggle the UI off with `enableBackgroundPresets: false`, or change the storage location with `backgroundPresetStorageKey`.
+
+The same functionality is available programmatically:
+
+```javascript
+// Capture the current basemap element visibility
+const visibility = layerControl.getBackgroundLayerVisibility();
+// → { 'water': true, 'road-primary': false, ... }
+
+// Apply a configuration (only layers present in the style are affected)
+layerControl.applyBackgroundLayerVisibility(visibility);
+
+// Named presets (persisted to localStorage)
+layerControl.saveBackgroundPreset('Minimal');   // save current visibility
+layerControl.getBackgroundPresets();            // → { Minimal: { ... } }
+layerControl.applyBackgroundPreset('Minimal');  // → true if it existed
+layerControl.deleteBackgroundPreset('Minimal');
+```
 
 ### Custom Layer Adapters
 

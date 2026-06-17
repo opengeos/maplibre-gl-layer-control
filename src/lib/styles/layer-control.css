@@ -868,6 +868,14 @@
   border-color: #1a4fc2;
 }
 
+.layer-control-background-legend .background-legend-action-btn:disabled {
+  background: #b9c4d6 !important;
+  background-color: #b9c4d6 !important;
+  border-color: #b9c4d6;
+  color: #ffffff;
+  cursor: not-allowed;
+}
+
 /* Filter row */
 .background-legend-filter {
   display: flex;
@@ -932,6 +940,53 @@
   width: 14px;
   height: 14px;
   display: block;
+}
+
+/* Saved configurations (presets) */
+.background-legend-presets {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.background-legend-presets-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #444;
+  margin-bottom: 6px;
+}
+
+.background-legend-presets-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.background-legend-presets-row:last-child {
+  margin-bottom: 0;
+}
+
+.background-legend-presets-select,
+.background-legend-presets-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 3px;
+  background: #ffffff;
+  color: #333;
+  font-size: 11px;
+  height: auto;
+}
+
+.background-legend-presets-select:focus,
+.background-legend-presets-input:focus {
+  outline: none;
+  border-color: #2f6fed;
+}
+
+.background-legend-presets-row .background-legend-action-btn {
+  flex: 0 0 auto;
 }
 
 .background-legend-layer-name {

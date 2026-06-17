@@ -144,7 +144,35 @@ export interface LayerControlOptions {
   onLayerReorder?: (layerOrder: string[]) => void;
   /** Callback when a layer is removed via context menu */
   onLayerRemove?: (layerId: string) => void;
+  /**
+   * Whether to show the "Saved configurations" controls in the Background Layers
+   * panel, letting users save the current basemap element visibility as a named
+   * preset and re-apply it later with one click (default: true).
+   */
+  enableBackgroundPresets?: boolean;
+  /**
+   * localStorage key under which background-layer visibility presets are stored.
+   * Presets persist across sessions and projects (default:
+   * 'maplibre-layer-control:background-presets').
+   */
+  backgroundPresetStorageKey?: string;
+  /**
+   * Callback fired whenever the set of saved background presets changes
+   * (created, applied, or deleted). Receives the full preset map.
+   */
+  onBackgroundPresetsChange?: (presets: BackgroundPresets) => void;
 }
+
+/**
+ * A single background-layer visibility preset: a map of style-layer ID to
+ * whether that layer should be visible.
+ */
+export type BackgroundLayerVisibility = Record<string, boolean>;
+
+/**
+ * Collection of named background-layer visibility presets, keyed by preset name.
+ */
+export type BackgroundPresets = Record<string, BackgroundLayerVisibility>;
 
 /**
  * MapLibre layer types that support styling
