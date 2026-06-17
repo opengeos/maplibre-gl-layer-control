@@ -17,10 +17,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      # Note: no `registry-url` here. setup-node's registry-url writes an
+      # .npmrc with `_authToken=${NODE_AUTH_TOKEN}`; with no token that
+      # placeholder is used as the credential and npm never falls back to
+      # OIDC. Omitting it lets Trusted Publishing (OIDC) authenticate against
+      # the default registry.npmjs.org.
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
 
       # Trusted Publishing requires npm >= 11.5.1, newer than the version
       # bundled with Node 22.
