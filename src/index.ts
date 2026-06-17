@@ -14,6 +14,8 @@ export type {
   PaintProperty,
   StyleControlConfig,
   CustomLayerAdapter,
+  BackgroundLayerVisibility,
+  BackgroundPresets,
 } from './lib/core/types';
 
 // Re-export utilities for advanced use cases

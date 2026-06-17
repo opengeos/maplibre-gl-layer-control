@@ -10,6 +10,8 @@ import type {
   OriginalStyle,
   InternalControlState,
   CustomLayerAdapter,
+  BackgroundLayerVisibility,
+  BackgroundPresets,
 } from "./types";
 import { CustomLayerRegistry } from "./CustomLayerRegistry";
 import {
@@ -104,6 +106,11 @@ export class LayerControl implements IControl {
   private onLayerReorder?: (layerOrder: string[]) => void;
   private onLayerRemove?: (layerId: string) => void;
 
+  // Background-layer visibility presets
+  private enableBackgroundPresets: boolean;
+  private backgroundPresetStorageKey: string;
+  private onBackgroundPresetsChange?: (presets: BackgroundPresets) => void;
+
   constructor(options: LayerControlOptions = {}) {
     this.minPanelWidth = options.panelMinWidth || 240;
     this.maxPanelWidth = options.panelMaxWidth || 420;
@@ -123,6 +130,13 @@ export class LayerControl implements IControl {
     this.onLayerRename = options.onLayerRename;
     this.onLayerReorder = options.onLayerReorder;
     this.onLayerRemove = options.onLayerRemove;
+
+    // Background-layer visibility presets
+    this.enableBackgroundPresets = options.enableBackgroundPresets !== false;
+    this.backgroundPresetStorageKey =
+      options.backgroundPresetStorageKey ||
+      "maplibre-layer-control:background-presets";
+    this.onBackgroundPresetsChange = options.onBackgroundPresetsChange;
 
     this.initialLayerStates = options.layerStates || {};
 
@@ -2081,7 +2095,140 @@ export class LayerControl implements IControl {
     panel.appendChild(filterRow);
     panel.appendChild(layerList);
 
+    // Saved configurations (presets) row
+    if (this.enableBackgroundPresets) {
+      panel.appendChild(this.createBackgroundPresetsRow());
+    }
+
     return panel;
+  }
+
+  /**
+   * Build the "Saved configurations" controls: a dropdown of saved presets with
+   * Apply/Delete actions, plus a name field and Save button to capture the
+   * current basemap element visibility as a reusable, persisted preset.
+   */
+  private createBackgroundPresetsRow(): HTMLElement {
+    const section = document.createElement("div");
+    section.className = "background-legend-presets";
+
+    const label = document.createElement("div");
+    label.className = "background-legend-presets-label";
+    label.textContent = "Saved configurations";
+    section.appendChild(label);
+
+    // Row 1: preset selector + apply/delete
+    const selectRow = document.createElement("div");
+    selectRow.className = "background-legend-presets-row";
+
+    const select = document.createElement("select");
+    select.className = "background-legend-presets-select";
+    select.title = "Saved configurations";
+
+    const applyBtn = document.createElement("button");
+    applyBtn.className = "background-legend-action-btn";
+    applyBtn.textContent = "Apply";
+    applyBtn.title = "Apply the selected configuration";
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "background-legend-action-btn";
+    deleteBtn.textContent = "Delete";
+    deleteBtn.title = "Delete the selected configuration";
+
+    const refreshSelect = (selected?: string) => {
+      const presets = this.getBackgroundPresets();
+      const names = Object.keys(presets).sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: "base" }),
+      );
+      select.innerHTML = "";
+
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = names.length
+        ? "Select a configuration…"
+        : "No saved configurations";
+      placeholder.disabled = names.length > 0;
+      select.appendChild(placeholder);
+
+      names.forEach((name) => {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        select.appendChild(option);
+      });
+
+      select.value = selected && names.includes(selected) ? selected : "";
+      const hasSelection = select.value !== "";
+      applyBtn.disabled = !hasSelection;
+      deleteBtn.disabled = !hasSelection;
+    };
+
+    select.addEventListener("change", () => {
+      const hasSelection = select.value !== "";
+      applyBtn.disabled = !hasSelection;
+      deleteBtn.disabled = !hasSelection;
+    });
+
+    applyBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (select.value) this.applyBackgroundPreset(select.value);
+    });
+
+    deleteBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (select.value) {
+        this.deleteBackgroundPreset(select.value);
+        refreshSelect();
+      }
+    });
+
+    selectRow.appendChild(select);
+    selectRow.appendChild(applyBtn);
+    selectRow.appendChild(deleteBtn);
+
+    // Row 2: name input + save
+    const saveRow = document.createElement("div");
+    saveRow.className = "background-legend-presets-row";
+
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "background-legend-presets-input";
+    nameInput.placeholder = "Configuration name…";
+    nameInput.maxLength = 60;
+
+    const saveBtn = document.createElement("button");
+    saveBtn.className = "background-legend-action-btn";
+    saveBtn.textContent = "Save";
+    saveBtn.title = "Save the current visibility as a configuration";
+
+    const commitSave = () => {
+      const name = nameInput.value.trim();
+      if (!name) return;
+      this.saveBackgroundPreset(name);
+      nameInput.value = "";
+      refreshSelect(name);
+    };
+
+    saveBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      commitSave();
+    });
+    nameInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        commitSave();
+      }
+    });
+
+    saveRow.appendChild(nameInput);
+    saveRow.appendChild(saveBtn);
+
+    section.appendChild(selectRow);
+    section.appendChild(saveRow);
+
+    refreshSelect();
+
+    return section;
   }
 
   /**
@@ -2290,6 +2437,168 @@ export class LayerControl implements IControl {
     if (this.state.layerStates["Background"]) {
       this.state.layerStates["Background"].visible = anyVisible;
     }
+  }
+
+  /**
+   * Return the IDs of the background (basemap) style layers the control can
+   * toggle, honoring the drawn-layer and user-defined exclusion filters but not
+   * the transient "only rendered" view filter.
+   */
+  private getControllableBackgroundLayerIds(): string[] {
+    const styleLayers = this.map.getStyle().layers || [];
+    return styleLayers
+      .filter((layer) => {
+        if (this.isUserAddedLayer(layer.id)) return false;
+        if (this.excludeDrawnLayers && this.isDrawnLayer(layer.id)) return false;
+        if (this.isExcludedByPattern(layer.id)) return false;
+        return true;
+      })
+      .map((layer) => layer.id);
+  }
+
+  /**
+   * Get the current visibility of every controllable background (basemap) layer.
+   *
+   * @returns A map of style-layer ID to whether it is currently visible.
+   */
+  getBackgroundLayerVisibility(): BackgroundLayerVisibility {
+    const visibility: BackgroundLayerVisibility = {};
+    for (const layerId of this.getControllableBackgroundLayerIds()) {
+      const value = this.map.getLayoutProperty(layerId, "visibility");
+      visibility[layerId] = value !== "none";
+    }
+    return visibility;
+  }
+
+  /**
+   * Apply a saved background-layer visibility configuration to the map. Only
+   * layers that currently exist in the style are affected, so a configuration
+   * captured on one basemap degrades gracefully when applied to another.
+   *
+   * @param visibility - Map of style-layer ID to desired visibility.
+   */
+  applyBackgroundLayerVisibility(visibility: BackgroundLayerVisibility): void {
+    for (const [layerId, visible] of Object.entries(visibility)) {
+      if (this.isUserAddedLayer(layerId)) continue;
+      if (!this.map.getLayer(layerId)) continue;
+      this.state.backgroundLayerVisibility.set(layerId, visible);
+      this.map.setLayoutProperty(
+        layerId,
+        "visibility",
+        visible ? "visible" : "none",
+      );
+    }
+
+    // Refresh the open legend panel (if any) and the main Background checkbox.
+    const legendPanel = this.panel.querySelector(
+      ".background-legend-layer-list",
+    );
+    if (legendPanel) {
+      this.populateBackgroundLayerList(legendPanel as HTMLElement);
+    }
+    this.updateBackgroundCheckboxState();
+  }
+
+  /**
+   * Read all saved background-layer presets from localStorage. Returns an empty
+   * object when storage is unavailable or the stored value is malformed.
+   */
+  getBackgroundPresets(): BackgroundPresets {
+    try {
+      const raw =
+        typeof localStorage !== "undefined"
+          ? localStorage.getItem(this.backgroundPresetStorageKey)
+          : null;
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return {};
+      }
+      // Keep only safe, own keys mapping to plain objects, so a hand-crafted
+      // storage value cannot smuggle in dangerous keys (e.g. `__proto__`).
+      const presets: BackgroundPresets = {};
+      for (const [name, value] of Object.entries(parsed)) {
+        if (this.isUnsafePresetKey(name)) continue;
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+          presets[name] = value as BackgroundLayerVisibility;
+        }
+      }
+      return presets;
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * Reject preset names that, used as object keys, could pollute the prototype
+   * chain or otherwise alias built-in object members.
+   */
+  private isUnsafePresetKey(name: string): boolean {
+    return (
+      name === "__proto__" || name === "constructor" || name === "prototype"
+    );
+  }
+
+  /**
+   * Persist the full preset map to localStorage and notify listeners.
+   */
+  private writeBackgroundPresets(presets: BackgroundPresets): void {
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(
+          this.backgroundPresetStorageKey,
+          JSON.stringify(presets),
+        );
+      }
+    } catch {
+      // Storage may be unavailable (private mode, quota); presets stay in-memory
+      // for this session via the UI but cannot be persisted.
+    }
+    this.onBackgroundPresetsChange?.(presets);
+  }
+
+  /**
+   * Save the current background-layer visibility as a named preset. Reusing an
+   * existing name overwrites that preset.
+   *
+   * @param name - Preset name; whitespace is trimmed. Empty names are ignored.
+   * @returns The updated preset map.
+   */
+  saveBackgroundPreset(name: string): BackgroundPresets {
+    const trimmed = name.trim();
+    const presets = this.getBackgroundPresets();
+    if (!trimmed || this.isUnsafePresetKey(trimmed)) return presets;
+    presets[trimmed] = this.getBackgroundLayerVisibility();
+    this.writeBackgroundPresets(presets);
+    return presets;
+  }
+
+  /**
+   * Apply a previously saved preset to the map.
+   *
+   * @param name - The preset name to apply.
+   * @returns `true` if a preset with that name existed and was applied.
+   */
+  applyBackgroundPreset(name: string): boolean {
+    const presets = this.getBackgroundPresets();
+    if (!Object.prototype.hasOwnProperty.call(presets, name)) return false;
+    this.applyBackgroundLayerVisibility(presets[name]);
+    return true;
+  }
+
+  /**
+   * Delete a saved preset.
+   *
+   * @param name - The preset name to remove.
+   * @returns The updated preset map.
+   */
+  deleteBackgroundPreset(name: string): BackgroundPresets {
+    const presets = this.getBackgroundPresets();
+    if (Object.prototype.hasOwnProperty.call(presets, name)) {
+      delete presets[name];
+      this.writeBackgroundPresets(presets);
+    }
+    return presets;
   }
 
   /**
