@@ -150,3 +150,90 @@ describe("drag reorder applies panel order to the map (issue #449)", () => {
     expect(mapOrderTopToBottom()).toEqual(["a", "c", "b", "bg"]);
   });
 });
+
+/**
+ * Build a control whose user layers are custom-adapter layers (deck.gl / raster
+ * style integrations) whose logical IDs differ from the underlying style layer
+ * IDs. The adapter maps each logical ID to its native layer(s) so map order can
+ * be resolved.
+ *
+ * @param nativeMapOrder Native style layer IDs, bottom-to-top.
+ * @param logicalToNative Logical custom-layer ID -> its native style layer IDs.
+ * @param insertionOrder Logical IDs in the order they were added to the state.
+ */
+function makeCustomControl(
+  nativeMapOrder: string[],
+  logicalToNative: Record<string, string[]>,
+  insertionOrder: string[],
+) {
+  const mockMap = {
+    getStyle: () => ({
+      layers: nativeMapOrder.map((id) => ({ id, type: "raster" })),
+    }),
+    getLayer: (id: string) =>
+      nativeMapOrder.includes(id) ? { id, type: "raster" } : undefined,
+    getLayoutProperty: () => "visible",
+    setLayoutProperty: () => {},
+    getPaintProperty: () => undefined,
+  };
+
+  const adapter = {
+    type: "test",
+    getLayerIds: () => insertionOrder,
+    getLayerState: (id: string) => ({
+      visible: true,
+      opacity: 1,
+      name: id,
+      isCustomLayer: true,
+    }),
+    setVisibility: () => {},
+    setOpacity: () => {},
+    getName: (id: string) => id,
+    getNativeLayerIds: (id: string) => logicalToNative[id] ?? [],
+  };
+
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const control = new LayerControl({
+    excludeDrawnLayers: false,
+    customLayerAdapters: [adapter as any],
+  });
+  (control as any).map = mockMap;
+  (control as any).panel = document.createElement("div");
+  // Seed the state in the given insertion order, all flagged as custom layers.
+  for (const id of insertionOrder) {
+    (control as any).state.layerStates[id] = {
+      visible: true,
+      opacity: 1,
+      name: id,
+      isCustomLayer: true,
+    };
+  }
+  return {
+    control,
+    order: () => (control as any).getUserLayerIdsInMapOrder() as string[],
+  };
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+}
+
+describe("custom-layer order follows the native map stacking (issue #449)", () => {
+  it("orders custom layers by their native layer index, not insertion order", () => {
+    // Native stacking bottom-to-top: bg, layer-A-raster, layer-B-raster.
+    // "A" was added first but sits below "B" on the map, so the panel must
+    // still show B (top) above A.
+    const { order } = makeCustomControl(
+      ["bg", "layer-A-raster", "layer-B-raster"],
+      { A: ["layer-A-raster"], B: ["layer-B-raster"] },
+      ["A", "B"],
+    );
+    expect(order()).toEqual(["B", "A"]);
+  });
+
+  it("keeps custom layers with no resolvable native layer on top in insertion order", () => {
+    const { order } = makeCustomControl(
+      ["bg"],
+      { A: [], B: [] },
+      ["A", "B"],
+    );
+    expect(order()).toEqual(["A", "B"]);
+  });
+});
