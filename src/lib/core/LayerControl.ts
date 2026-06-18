@@ -4126,29 +4126,51 @@ export class LayerControl implements IControl {
 
     // Get map layers in their actual order (low index = rendered first/bottom)
     const mapLayerIds = style.layers.map((l) => l.id);
+    const indexById = new Map(mapLayerIds.map((id, i) => [id, i]));
 
     // Filter to only user layers that are in our state
     const userLayerIds = Object.keys(this.state.layerStates).filter(
       (id) => id !== "Background",
     );
 
-    // Separate MapLibre layers and custom layers
-    const mapLibreLayers = userLayerIds.filter((id) =>
-      mapLayerIds.includes(id),
-    );
-    const customLayers = userLayerIds.filter(
-      (id) =>
-        this.state.layerStates[id]?.isCustomLayer && !mapLayerIds.includes(id),
-    );
+    // Compute a representative z-position (map index) for every user layer so
+    // that MapLibre layers and custom layers can be ordered together by their
+    // actual stacking order. Custom layers (e.g. deck.gl / raster adapters)
+    // often expose a logical ID that differs from the underlying style layer
+    // IDs, so look those up through the adapter (getNativeLayerIds) and use the
+    // top-most native layer's index. Custom layers with no resolvable native
+    // layer stay on top (Infinity), preserving their relative insertion order.
+    const mapIndexOf = (id: string): number => {
+      const direct = indexById.get(id);
+      if (direct !== undefined) return direct;
 
-    // Sort MapLibre layers by map order (reversed: high index = top in UI)
-    const sortedMapLibreLayers = mapLibreLayers.sort(
-      (a, b) => mapLayerIds.indexOf(b) - mapLayerIds.indexOf(a),
-    );
+      const nativeIds = this.customLayerRegistry?.getNativeLayerIds(id);
+      if (nativeIds && nativeIds.length > 0) {
+        let best = -1;
+        for (const nativeId of nativeIds) {
+          const idx = indexById.get(nativeId);
+          if (idx !== undefined && idx > best) best = idx;
+        }
+        if (best !== -1) return best;
+      }
 
-    // Custom layers are placed at the top (rendered last/on top)
-    // Maintain their relative order from the state
-    return [...customLayers, ...sortedMapLibreLayers];
+      return Number.POSITIVE_INFINITY;
+    };
+
+    // Sort by map index descending (high index = top of UI), keeping the
+    // original insertion order as a stable tiebreaker (notably for unresolved
+    // custom layers that all share an Infinity index).
+    return userLayerIds
+      .map((id, insertionIndex) => ({
+        id,
+        insertionIndex,
+        mapIndex: mapIndexOf(id),
+      }))
+      .sort((a, b) => {
+        if (a.mapIndex !== b.mapIndex) return a.mapIndex > b.mapIndex ? -1 : 1;
+        return a.insertionIndex - b.insertionIndex;
+      })
+      .map((entry) => entry.id);
   }
 
   /**
