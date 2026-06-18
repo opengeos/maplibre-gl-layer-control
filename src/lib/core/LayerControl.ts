@@ -1415,8 +1415,35 @@ export class LayerControl implements IControl {
     existingItems.forEach((item) => item.remove());
     this.styleEditors.clear();
 
+    // Render in map stacking order: the top of the panel is the top-most layer
+    // (highest z-index, rendered last) and the bottom is the lowest. The
+    // Background group always sits at the very bottom, matching the basemap
+    // being the bottom-most map layer. Iterating layerStates in insertion order
+    // would instead put Background on top and reverse the user layers, so the
+    // panel order would not match the actual map order (issue #449).
+    const orderedLayerIds = this.getUserLayerIdsInMapOrder();
+
+    // Include any user layers that map-order detection did not capture (e.g.
+    // transient states where the layer is not yet on the map) so nothing
+    // silently disappears from the panel.
+    const captured = new Set(orderedLayerIds);
+    for (const layerId of Object.keys(this.state.layerStates)) {
+      if (layerId !== "Background" && !captured.has(layerId)) {
+        orderedLayerIds.push(layerId);
+      }
+    }
+
+    // Background always renders last so it appears at the bottom of the panel.
+    if (this.state.layerStates["Background"]) {
+      orderedLayerIds.push("Background");
+    }
+
     // Add items for all layers in our state
-    Object.entries(this.state.layerStates).forEach(([layerId, state]) => {
+    orderedLayerIds.forEach((layerId) => {
+      const state = this.state.layerStates[layerId];
+      if (!state) {
+        return;
+      }
       if (
         this.targetLayers.length === 0 ||
         this.targetLayers.includes(layerId)
@@ -2449,7 +2476,8 @@ export class LayerControl implements IControl {
     return styleLayers
       .filter((layer) => {
         if (this.isUserAddedLayer(layer.id)) return false;
-        if (this.excludeDrawnLayers && this.isDrawnLayer(layer.id)) return false;
+        if (this.excludeDrawnLayers && this.isDrawnLayer(layer.id))
+          return false;
         if (this.isExcludedByPattern(layer.id)) return false;
         return true;
       })
