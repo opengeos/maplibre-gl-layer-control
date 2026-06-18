@@ -143,7 +143,7 @@ export default function App() {
           layers={['countries-layer', 'countries-outline', 'country-points']}
           panelWidth={350}
           panelMinWidth={240}
-          panelMaxWidth={450}
+          panelMaxWidth={960}
         />
       )}
     </div>

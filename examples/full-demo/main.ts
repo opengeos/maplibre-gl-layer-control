@@ -143,8 +143,8 @@ map.on('load', () => {
     collapsed: false, // Start expanded to show features
     panelWidth: 350,
     panelMinWidth: 240,
-    panelMaxWidth: 450,
-    panelMaxHeight: 400,
+    panelMaxWidth: 960,
+    // panelMaxHeight omitted so the panel fills the available vertical space
     showStyleEditor: true,
     showOpacitySlider: true,
     basemapStyleUrl: BASEMAP_STYLE_URL, // Enables reliable basemap vs user layer detection

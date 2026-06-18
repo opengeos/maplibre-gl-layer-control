@@ -61,63 +61,6 @@
   font-size: 13px;
 }
 
-/* Width control */
-.layer-control-width-control {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 500;
-  font-size: 11px;
-  color: #5c6a7d;
-  flex-shrink: 0;
-  margin-left: auto;
-}
-
-.layer-control-width-slider {
-  position: relative;
-  width: 130px;
-  height: 16px;
-  border-radius: 8px;
-  cursor: ew-resize;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  touch-action: none;
-  background: transparent;
-  padding: 0 8px;
-  box-sizing: border-box;
-}
-
-.layer-control-width-value {
-  min-width: 44px;
-  text-align: right;
-  font-feature-settings: "tnum";
-  color: #3a4756;
-}
-
-.layer-control-width-track {
-  position: absolute;
-  left: 8px;
-  right: 8px;
-  height: 4px;
-  border-radius: 2px;
-  background: linear-gradient(90deg, #d0d7e2, #2f6fed);
-  pointer-events: none;
-}
-
-.layer-control-width-thumb {
-  position: absolute;
-  top: 50%;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #fff;
-  border: 2px solid #2f6fed;
-  transform: translateY(-50%);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-  pointer-events: none;
-}
-
 /* Edge resize handle — drag the panel edge to resize its width */
 .layer-control-resize-handle {
   position: absolute;

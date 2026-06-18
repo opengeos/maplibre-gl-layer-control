@@ -111,7 +111,7 @@ export interface LayerControlOptions {
   panelWidth?: number;
   /** Minimum panel width in pixels (default: 240) */
   panelMinWidth?: number;
-  /** Maximum panel width in pixels (default: 420) */
+  /** Maximum panel width in pixels (default: 960) */
   panelMaxWidth?: number;
   /** Whether to show the style editor button (gear icon) for layers (default: true) */
   showStyleEditor?: boolean;
@@ -119,7 +119,12 @@ export interface LayerControlOptions {
   showOpacitySlider?: boolean;
   /** Whether to show layer type symbols/icons next to layer names (default: true) */
   showLayerSymbol?: boolean;
-  /** Maximum panel height in pixels (default: 600). When content exceeds this height, the panel becomes scrollable. */
+  /**
+   * Maximum panel height in pixels. When omitted, the panel grows to fill the
+   * available vertical space in the map container and only becomes scrollable
+   * once the layer list is taller than that space. Set an explicit value to
+   * cap the height instead.
+   */
   panelMaxHeight?: number;
   /** Whether to exclude drawn layers from drawing libraries like Geoman, Mapbox GL Draw, etc. (default: true) */
   excludeDrawnLayers?: boolean;

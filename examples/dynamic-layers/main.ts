@@ -85,7 +85,7 @@ map.on('load', () => {
     collapsed: false,
     panelWidth: 350,
     panelMinWidth: 240,
-    panelMaxWidth: 450,
+    panelMaxWidth: 960,
     showStyleEditor: true,
     showOpacitySlider: true,
     showLayerSymbol: true,
