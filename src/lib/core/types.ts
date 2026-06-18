@@ -150,6 +150,18 @@ export interface LayerControlOptions {
   /** Callback when a layer is removed via context menu */
   onLayerRemove?: (layerId: string) => void;
   /**
+   * Callback fired when the Background (basemap) group visibility is toggled
+   * via the control's checkbox. Lets consumers mirror the new state into their
+   * own store so external basemap UI (e.g. a separate layer panel) stays in sync.
+   */
+  onBackgroundVisibilityChange?: (visible: boolean) => void;
+  /**
+   * Callback fired when the Background (basemap) group opacity is changed via
+   * the control's slider. Lets consumers mirror the new opacity into their own
+   * store so external basemap UI stays in sync.
+   */
+  onBackgroundOpacityChange?: (opacity: number) => void;
+  /**
    * Whether to show the "Saved configurations" controls in the Background Layers
    * panel, letting users save the current basemap element visibility as a named
    * preset and re-apply it later with one click (default: true).
