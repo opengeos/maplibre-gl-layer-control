@@ -99,6 +99,8 @@ export class LayerControl implements IControl {
   ) => void;
   private onLayerReorder?: (layerOrder: string[]) => void;
   private onLayerRemove?: (layerId: string) => void;
+  private onBackgroundVisibilityChange?: (visible: boolean) => void;
+  private onBackgroundOpacityChange?: (opacity: number) => void;
 
   // Background-layer visibility presets
   private enableBackgroundPresets: boolean;
@@ -127,6 +129,8 @@ export class LayerControl implements IControl {
     this.onLayerRename = options.onLayerRename;
     this.onLayerReorder = options.onLayerReorder;
     this.onLayerRemove = options.onLayerRemove;
+    this.onBackgroundVisibilityChange = options.onBackgroundVisibilityChange;
+    this.onBackgroundOpacityChange = options.onBackgroundOpacityChange;
 
     // Background-layer visibility presets
     this.enableBackgroundPresets = options.enableBackgroundPresets !== false;
@@ -1726,6 +1730,9 @@ export class LayerControl implements IControl {
         });
       }
     }
+
+    // Notify consumers so external basemap UI can mirror the new state.
+    this.onBackgroundVisibilityChange?.(visible);
   }
 
   /**
@@ -1747,6 +1754,9 @@ export class LayerControl implements IControl {
         }
       }
     });
+
+    // Notify consumers so external basemap UI can mirror the new opacity.
+    this.onBackgroundOpacityChange?.(opacity);
   }
 
   // ===== Background Legend Methods =====

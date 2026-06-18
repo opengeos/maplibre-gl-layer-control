@@ -179,6 +179,8 @@ function MapComponent() {
 | `enableBackgroundPresets` | `boolean` | `true` | Show the "Saved configurations" controls in the Background Layers panel |
 | `backgroundPresetStorageKey` | `string` | `'maplibre-layer-control:background-presets'` | `localStorage` key under which background visibility presets are stored |
 | `onBackgroundPresetsChange` | `(presets: BackgroundPresets) => void` | `undefined` | Called whenever the saved preset set changes (created or deleted); applying a preset does not change the set, so it does not fire |
+| `onBackgroundVisibilityChange` | `(visible: boolean) => void` | `undefined` | Called when the Background (basemap) group is toggled via the checkbox; mirror it into your own store to keep external basemap UI in sync |
+| `onBackgroundOpacityChange` | `(opacity: number) => void` | `undefined` | Called when the Background (basemap) group opacity slider changes; mirror it into your own store to keep external basemap UI in sync |
 
 ### LayerState
 
