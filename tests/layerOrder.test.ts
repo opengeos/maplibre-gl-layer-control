@@ -215,6 +215,101 @@ function makeCustomControl(
   /* eslint-enable @typescript-eslint/no-explicit-any */
 }
 
+/**
+ * Build a control with only the basemap, then expose a helper to add a new
+ * user layer to the map and run the same detection path the map's `styledata`
+ * event triggers (checkForNewLayers).
+ */
+function makeIncrementalControl() {
+  let layers = [{ id: "bg", type: "fill" }];
+  const mockMap = {
+    getStyle: () => ({ layers }),
+    getLayer: (id: string) => layers.find((l) => l.id === id),
+    getLayoutProperty: () => "visible",
+    setLayoutProperty: () => {},
+    getPaintProperty: () => undefined,
+  };
+
+  const control = new LayerControl({
+    excludeDrawnLayers: false,
+    enableDragAndDrop: false,
+    showLayerSymbol: false,
+    showStyleEditor: false,
+    showOpacitySlider: false,
+    enableContextMenu: false,
+  });
+
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  (control as any).map = mockMap;
+  (control as any).panel = document.createElement("div");
+  (control as any).basemapLayerIds = new Set(["bg"]);
+  // Treat any non-basemap layer as user-added for detection purposes.
+  (control as any).isUserAddedLayer = () => true;
+  (control as any).autoDetectLayers();
+  (control as any).buildLayerItems();
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+
+  return {
+    control,
+    addLayerAndDetect: (id: string) => {
+      layers.push({ id, type: "fill" });
+      /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+      (control as any).checkForNewLayers();
+    },
+  };
+}
+
+describe("layers added while the control is open (issue #449)", () => {
+  it("places a newly added layer above the Background group, not below it", () => {
+    const { control, addLayerAndDetect } = makeIncrementalControl();
+    // Initially only the basemap group is shown.
+    expect(renderedOrder(control)).toEqual(["Background"]);
+
+    // Adding a layer after the panel is built must rebuild it in order so the
+    // new layer sits at the top, not appended below Background.
+    addLayerAndDetect("user-1");
+    expect(renderedOrder(control)).toEqual(["user-1", "Background"]);
+
+    // A second added layer goes on top of the first (last added = top-most).
+    addLayerAndDetect("user-2");
+    expect(renderedOrder(control)).toEqual(["user-2", "user-1", "Background"]);
+  });
+
+  it("renders the Background group even with an explicit targetLayers list", () => {
+    // GeoLibre-style usage: the control is restricted to specific user layers
+    // (here a single layer), so targetLayers does not include "Background".
+    // The synthetic Background group must still render at the bottom.
+    const { control } = makeCustomControl(
+      ["bg", "layer-A-raster"],
+      { A: ["layer-A-raster"] },
+      ["A"],
+    );
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    (control as any).state.layerStates["Background"] = {
+      visible: true,
+      opacity: 1,
+      name: "Background",
+    };
+    (control as any).targetLayers = ["A"]; // explicit list, no "Background"
+    (control as any).buildLayerItems();
+    /* eslint-enable @typescript-eslint/no-explicit-any */
+    expect(renderedOrder(control)).toEqual(["A", "Background"]);
+  });
+
+  it("keeps the Background group when targetLayers is empty (show-all mode)", () => {
+    const { control, addLayerAndDetect } = makeIncrementalControl();
+    // Show-all mode: an empty target list means every layer is rendered. The
+    // rebuild must not start filtering Background out.
+    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+    (control as any).targetLayers = [];
+
+    addLayerAndDetect("user-1");
+    expect(renderedOrder(control)).toEqual(["user-1", "Background"]);
+    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+    expect((control as any).targetLayers).toEqual([]);
+  });
+});
+
 describe("custom-layer order follows the native map stacking (issue #449)", () => {
   it("orders custom layers by their native layer index, not insertion order", () => {
     // Native stacking bottom-to-top: bg, layer-A-raster, layer-B-raster.
