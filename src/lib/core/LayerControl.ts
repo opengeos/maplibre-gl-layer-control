@@ -1264,13 +1264,17 @@ export class LayerControl implements IControl {
       orderedLayerIds.push("Background");
     }
 
-    // Add items for all layers in our state
+    // Add items for all layers in our state. The Background group is a synthetic
+    // entry (not a real target layer), so it always renders when present even
+    // when an explicit targetLayers list is in use; otherwise restricting the
+    // control to specific layers would hide the basemap group entirely.
     orderedLayerIds.forEach((layerId) => {
       const state = this.state.layerStates[layerId];
       if (!state) {
         return;
       }
       if (
+        layerId === "Background" ||
         this.targetLayers.length === 0 ||
         this.targetLayers.includes(layerId)
       ) {
@@ -3567,6 +3571,11 @@ export class LayerControl implements IControl {
           (id) => id === "Background" || this.state.layerStates[id],
         );
 
+      // Track whether new layers were added so the panel can be rebuilt in the
+      // correct stacking order afterwards (appending items would otherwise place
+      // a newly added layer at the bottom, below the Background group).
+      let layersAdded = false;
+
       // Find new layers that aren't in our state yet
       const newLayers: string[] = [];
 
@@ -3698,9 +3707,18 @@ export class LayerControl implements IControl {
             opacity: opacity,
             name: this.generateFriendlyName(layerId),
           };
+          // Keep an explicit target-layer list in sync so the rebuilt panel
+          // still renders this layer. An empty list means "show all", so it
+          // must stay empty (pushing would start filtering out other layers
+          // such as the Background group).
+          if (
+            this.targetLayers.length > 0 &&
+            !this.targetLayers.includes(layerId)
+          ) {
+            this.targetLayers.push(layerId);
+          }
 
-          // Add to UI
-          this.addLayerItem(layerId, this.state.layerStates[layerId]);
+          layersAdded = true;
         });
       }
 
@@ -3725,7 +3743,14 @@ export class LayerControl implements IControl {
                 customLayerType:
                   this.customLayerRegistry!.getSymbolType(layerId) || undefined,
               };
-              this.addLayerItem(layerId, this.state.layerStates[layerId]);
+              // See note above: only extend a restricted (non-empty) list.
+              if (
+                this.targetLayers.length > 0 &&
+                !this.targetLayers.includes(layerId)
+              ) {
+                this.targetLayers.push(layerId);
+              }
+              layersAdded = true;
             }
           }
         });
@@ -3752,6 +3777,13 @@ export class LayerControl implements IControl {
             this.styleEditors.delete(layerId);
           }
         });
+      }
+
+      // Rebuild the panel so newly added layers are placed in the correct
+      // stacking order (top of the panel = top-most layer) instead of being
+      // appended below the Background group.
+      if (layersAdded) {
+        this.buildLayerItems();
       }
     } catch (error) {
       console.warn("Failed to check for new layers:", error);
