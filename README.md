@@ -14,7 +14,7 @@ A comprehensive layer control for MapLibre GL with advanced styling capabilities
 - ✅ **Layer visibility toggle** - Checkbox control for each layer
 - ✅ **Layer opacity control** - Smooth opacity slider with type-aware property mapping; **double-click the slider to type an exact percentage (0-100%)**
 - ✅ **Layer symbols** - Visual type indicators (colored shapes) next to layer names, auto-detected from layer paint properties
-- ✅ **Resizable panel** - **Drag either edge of the panel to resize it**, plus a width slider and keyboard support
+- ✅ **Resizable panel** - **Drag either edge of the panel to resize it**; double-click an edge to reset to the default width. The panel also grows to fill the available height so long layer lists only scroll once they exceed the map.
 - ✅ **Advanced style editor** - Per-layer-type styling controls:
   - **Fill layers**: color, opacity, outline-color
   - **Line layers**: color, width, opacity, blur
@@ -73,7 +73,7 @@ map.on('load', () => {
     layers: ['my-layer'], // LayerControl auto-detects opacity, visibility, and generates friendly names
     panelWidth: 340,
     panelMinWidth: 240,
-    panelMaxWidth: 450
+    panelMaxWidth: 960
   });
 
   // Option 2: Auto-detect with basemapStyleUrl (recommended for reliable basemap detection)
@@ -93,7 +93,7 @@ map.on('load', () => {
   //   collapsed: false,
   //   panelWidth: 340,
   //   panelMinWidth: 240,
-  //   panelMaxWidth: 450
+  //   panelMaxWidth: 960
   // });
 
   // Option 4: Manually specify layer states (for full control over names)
@@ -167,8 +167,8 @@ function MapComponent() {
 | `layerStates` | `Record<string, LayerState>` | `undefined` | Manual layer state configuration |
 | `panelWidth` | `number` | `320` | Initial panel width in pixels |
 | `panelMinWidth` | `number` | `240` | Minimum panel width |
-| `panelMaxWidth` | `number` | `420` | Maximum panel width |
-| `panelMaxHeight` | `number` | `600` | Maximum panel height (scrollable when exceeded) |
+| `panelMaxWidth` | `number` | `960` | Maximum panel width |
+| `panelMaxHeight` | `number` | `undefined` | Maximum panel height in pixels. Omit to fill the available vertical space (scrollable only when the layer list is taller than the map) |
 | `showStyleEditor` | `boolean` | `true` | Show gear icon for style editor |
 | `showOpacitySlider` | `boolean` | `true` | Show opacity slider for layers |
 | `showLayerSymbol` | `boolean` | `true` | Show layer type symbols (colored icons) next to layer names |

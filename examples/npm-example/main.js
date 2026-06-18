@@ -92,7 +92,7 @@ map.on('load', () => {
     layers: ['regions-fill', 'regions-outline', 'regions-points'],
     panelWidth: 350,
     panelMinWidth: 240,
-    panelMaxWidth: 450
+    panelMaxWidth: 960
   });
 
   // Option 2: Auto-detect layers with basemapStyleUrl for reliable detection

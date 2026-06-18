@@ -59,7 +59,8 @@ export class LayerControl implements IControl {
   private minPanelWidth: number;
   private maxPanelWidth: number;
   private initialPanelWidth: number;
-  private maxPanelHeight: number;
+  /** Explicit max panel height; null means fill available vertical space */
+  private maxPanelHeight: number | null;
   private showStyleEditor: boolean;
   private showOpacitySlider: boolean;
   private showLayerSymbol: boolean;
@@ -71,13 +72,6 @@ export class LayerControl implements IControl {
   private nativeLayerGroups: Map<string, string[]> = new Map();
   private basemapStyleUrl: string | null = null;
   private basemapLayerIds: Set<string> | null = null;
-  private widthSliderEl: HTMLElement | null = null;
-  private widthThumbEl: HTMLElement | null = null;
-  private widthValueEl: HTMLElement | null = null;
-  private isWidthSliderActive = false;
-  private widthDragRectWidth: number | null = null;
-  private widthDragStartX: number | null = null;
-  private widthDragStartWidth: number | null = null;
   private widthFrame: number | null = null;
 
   // Exact-opacity input popup
@@ -113,9 +107,12 @@ export class LayerControl implements IControl {
 
   constructor(options: LayerControlOptions = {}) {
     this.minPanelWidth = options.panelMinWidth || 240;
-    this.maxPanelWidth = options.panelMaxWidth || 420;
+    this.maxPanelWidth = options.panelMaxWidth || 960;
     this.initialPanelWidth = options.panelWidth || 350;
-    this.maxPanelHeight = options.panelMaxHeight || 600;
+    // When no explicit max height is given, the panel grows to fill the
+    // available vertical space in the map container (computed in
+    // updatePanelPosition) instead of being capped at a fixed height.
+    this.maxPanelHeight = options.panelMaxHeight ?? null;
     this.showStyleEditor = options.showStyleEditor !== false;
     this.showOpacitySlider = options.showOpacitySlider !== false;
     this.showLayerSymbol = options.showLayerSymbol !== false;
@@ -220,9 +217,6 @@ export class LayerControl implements IControl {
       this.contextMenuEl = this.createContextMenu();
       this.mapContainer.appendChild(this.contextMenuEl);
     }
-
-    // Now that panel is attached, update width display
-    this.updateWidthDisplay();
 
     // Setup event listeners
     this.setupEventListeners();
@@ -769,9 +763,13 @@ export class LayerControl implements IControl {
     const panel = document.createElement("div");
     panel.className = "layer-control-panel";
 
-    // Set initial width and max height directly on the element
+    // Set initial width directly on the element. The max height is computed
+    // dynamically in updatePanelPosition so the panel fills the available
+    // vertical space.
     panel.style.width = `${this.state.panelWidth}px`;
-    panel.style.maxHeight = `${this.maxPanelHeight}px`;
+    if (this.maxPanelHeight != null) {
+      panel.style.maxHeight = `${this.maxPanelHeight}px`;
+    }
 
     if (!this.state.collapsed) {
       panel.classList.add("expanded");
@@ -998,6 +996,25 @@ export class LayerControl implements IControl {
         this.panel.style.right = `${buttonRight}px`;
         break;
     }
+
+    // Let the panel use all the available vertical space in the map container
+    // so a long layer list fills the space before a scrollbar appears, rather
+    // than being capped at a fixed height. A user-provided panelMaxHeight still
+    // caps the panel.
+    const edgeMargin = 8; // keep the panel off the opposite map edge
+    const isTopAnchored = position === "top-left" || position === "top-right";
+    const occupiedFromEdge = isTopAnchored
+      ? buttonTop + buttonRect.height + panelGap
+      : buttonBottom + buttonRect.height + panelGap;
+    const availableHeight = Math.max(
+      120,
+      Math.round(mapRect.height - occupiedFromEdge - edgeMargin),
+    );
+    const maxHeight =
+      this.maxPanelHeight != null
+        ? Math.min(this.maxPanelHeight, availableHeight)
+        : availableHeight;
+    this.panel.style.maxHeight = `${maxHeight}px`;
   }
 
   /**
@@ -1054,7 +1071,8 @@ export class LayerControl implements IControl {
   }
 
   /**
-   * Create the panel header with title and width control
+   * Create the panel header with the title. Panel width is adjusted by
+   * dragging either edge of the panel (see createResizeHandle).
    */
   private createPanelHeader(): HTMLElement {
     const header = document.createElement("div");
@@ -1065,170 +1083,7 @@ export class LayerControl implements IControl {
     title.textContent = "Layers";
     header.appendChild(title);
 
-    // Add width control
-    const widthControl = this.createWidthControl();
-    header.appendChild(widthControl);
-
     return header;
-  }
-
-  /**
-   * Create the width control slider
-   */
-  private createWidthControl(): HTMLElement {
-    const widthControl = document.createElement("label");
-    widthControl.className = "layer-control-width-control";
-    widthControl.title = "Adjust layer panel width";
-
-    const widthLabel = document.createElement("span");
-    widthLabel.textContent = "Width";
-    widthControl.appendChild(widthLabel);
-
-    const widthSlider = document.createElement("div");
-    widthSlider.className = "layer-control-width-slider";
-    widthSlider.setAttribute("role", "slider");
-    widthSlider.setAttribute("aria-valuemin", String(this.minPanelWidth));
-    widthSlider.setAttribute("aria-valuemax", String(this.maxPanelWidth));
-    widthSlider.setAttribute("aria-valuenow", String(this.state.panelWidth));
-    widthSlider.setAttribute("aria-valuestep", "10");
-    widthSlider.setAttribute("aria-label", "Layer panel width");
-    widthSlider.tabIndex = 0;
-
-    const widthTrack = document.createElement("div");
-    widthTrack.className = "layer-control-width-track";
-    const widthThumb = document.createElement("div");
-    widthThumb.className = "layer-control-width-thumb";
-
-    widthSlider.appendChild(widthTrack);
-    widthSlider.appendChild(widthThumb);
-
-    this.widthSliderEl = widthSlider;
-    this.widthThumbEl = widthThumb;
-
-    // Add width value display
-    const widthValue = document.createElement("span");
-    widthValue.className = "layer-control-width-value";
-    this.widthValueEl = widthValue;
-
-    widthControl.appendChild(widthSlider);
-    widthControl.appendChild(widthValue);
-
-    this.updateWidthDisplay();
-    this.setupWidthSliderEvents(widthSlider);
-
-    return widthControl;
-  }
-
-  /**
-   * Setup event listeners for width slider
-   */
-  private setupWidthSliderEvents(widthSlider: HTMLElement): void {
-    // Pointer events for dragging
-    widthSlider.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      const rect = widthSlider.getBoundingClientRect();
-      this.widthDragRectWidth = rect.width || 1;
-      this.widthDragStartX = event.clientX;
-      this.widthDragStartWidth = this.state.panelWidth;
-      this.isWidthSliderActive = true;
-      widthSlider.setPointerCapture(event.pointerId);
-      this.updateWidthFromPointer(event, true);
-    });
-
-    widthSlider.addEventListener("pointermove", (event) => {
-      if (!this.isWidthSliderActive) return;
-      this.updateWidthFromPointer(event);
-    });
-
-    const endPointerDrag = (event: PointerEvent) => {
-      if (!this.isWidthSliderActive) return;
-      if (event.pointerId !== undefined) {
-        try {
-          widthSlider.releasePointerCapture(event.pointerId);
-        } catch (error) {
-          // Ignore release errors
-        }
-      }
-      this.isWidthSliderActive = false;
-      this.widthDragRectWidth = null;
-      this.widthDragStartX = null;
-      this.widthDragStartWidth = null;
-      this.updateWidthDisplay();
-    };
-
-    widthSlider.addEventListener("pointerup", endPointerDrag);
-    widthSlider.addEventListener("pointercancel", endPointerDrag);
-    widthSlider.addEventListener("lostpointercapture", endPointerDrag);
-
-    // Keyboard navigation
-    widthSlider.addEventListener("keydown", (event) => {
-      let handled = true;
-      const step = event.shiftKey ? 20 : 10;
-
-      switch (event.key) {
-        case "ArrowLeft":
-        case "ArrowDown":
-          this.applyPanelWidth(this.state.panelWidth - step, true);
-          break;
-        case "ArrowRight":
-        case "ArrowUp":
-          this.applyPanelWidth(this.state.panelWidth + step, true);
-          break;
-        case "Home":
-          this.applyPanelWidth(this.minPanelWidth, true);
-          break;
-        case "End":
-          this.applyPanelWidth(this.maxPanelWidth, true);
-          break;
-        case "PageUp":
-          this.applyPanelWidth(this.state.panelWidth + 50, true);
-          break;
-        case "PageDown":
-          this.applyPanelWidth(this.state.panelWidth - 50, true);
-          break;
-        default:
-          handled = false;
-      }
-
-      if (handled) {
-        event.preventDefault();
-        this.updateWidthDisplay();
-      }
-    });
-  }
-
-  /**
-   * Update panel width from pointer event
-   */
-  private updateWidthFromPointer(
-    event: PointerEvent,
-    resetBaseline = false,
-  ): void {
-    if (!this.widthSliderEl) return;
-
-    const sliderWidth =
-      this.widthDragRectWidth ||
-      this.widthSliderEl.getBoundingClientRect().width ||
-      1;
-    const widthRange = this.maxPanelWidth - this.minPanelWidth;
-
-    let width: number;
-    if (resetBaseline) {
-      const rect = this.widthSliderEl.getBoundingClientRect();
-      const relative =
-        rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
-      const clampedRatio = Math.min(1, Math.max(0, relative));
-      width = this.minPanelWidth + clampedRatio * widthRange;
-      this.widthDragStartWidth = width;
-      this.widthDragStartX = event.clientX;
-    } else {
-      const delta = event.clientX - (this.widthDragStartX || event.clientX);
-      width =
-        (this.widthDragStartWidth || this.state.panelWidth) +
-        (delta / sliderWidth) * widthRange;
-    }
-
-    this.applyPanelWidth(width, this.isWidthSliderActive);
   }
 
   /**
@@ -1243,7 +1098,6 @@ export class LayerControl implements IControl {
       this.state.panelWidth = clamped;
       const px = `${clamped}px`;
       this.panel.style.width = px;
-      this.updateWidthDisplay();
     };
 
     if (immediate) {
@@ -1258,38 +1112,6 @@ export class LayerControl implements IControl {
       applyWidth();
       this.widthFrame = null;
     });
-  }
-
-  /**
-   * Update width display (value label and thumb position)
-   */
-  private updateWidthDisplay(): void {
-    if (this.widthValueEl) {
-      this.widthValueEl.textContent = `${this.state.panelWidth}px`;
-    }
-    if (this.widthSliderEl) {
-      this.widthSliderEl.setAttribute(
-        "aria-valuenow",
-        String(this.state.panelWidth),
-      );
-      const ratio =
-        (this.state.panelWidth - this.minPanelWidth) /
-        (this.maxPanelWidth - this.minPanelWidth || 1);
-      if (this.widthThumbEl) {
-        const sliderWidth = this.widthSliderEl.clientWidth;
-        // If element not yet rendered, defer the update
-        if (sliderWidth === 0) {
-          requestAnimationFrame(() => this.updateWidthDisplay());
-          return;
-        }
-        const thumbWidth = this.widthThumbEl.offsetWidth || 14;
-        const padding = 16;
-        const available = Math.max(0, sliderWidth - padding - thumbWidth);
-        const clampedRatio = Math.min(1, Math.max(0, ratio));
-        const leftPx = 8 + available * clampedRatio;
-        this.widthThumbEl.style.left = `${leftPx}px`;
-      }
-    }
   }
 
   /**
@@ -1415,8 +1237,35 @@ export class LayerControl implements IControl {
     existingItems.forEach((item) => item.remove());
     this.styleEditors.clear();
 
+    // Render in map stacking order: the top of the panel is the top-most layer
+    // (highest z-index, rendered last) and the bottom is the lowest. The
+    // Background group always sits at the very bottom, matching the basemap
+    // being the bottom-most map layer. Iterating layerStates in insertion order
+    // would instead put Background on top and reverse the user layers, so the
+    // panel order would not match the actual map order (issue #449).
+    const orderedLayerIds = this.getUserLayerIdsInMapOrder();
+
+    // Include any user layers that map-order detection did not capture (e.g.
+    // transient states where the layer is not yet on the map) so nothing
+    // silently disappears from the panel.
+    const captured = new Set(orderedLayerIds);
+    for (const layerId of Object.keys(this.state.layerStates)) {
+      if (layerId !== "Background" && !captured.has(layerId)) {
+        orderedLayerIds.push(layerId);
+      }
+    }
+
+    // Background always renders last so it appears at the bottom of the panel.
+    if (this.state.layerStates["Background"]) {
+      orderedLayerIds.push("Background");
+    }
+
     // Add items for all layers in our state
-    Object.entries(this.state.layerStates).forEach(([layerId, state]) => {
+    orderedLayerIds.forEach((layerId) => {
+      const state = this.state.layerStates[layerId];
+      if (!state) {
+        return;
+      }
       if (
         this.targetLayers.length === 0 ||
         this.targetLayers.includes(layerId)
@@ -2449,7 +2298,8 @@ export class LayerControl implements IControl {
     return styleLayers
       .filter((layer) => {
         if (this.isUserAddedLayer(layer.id)) return false;
-        if (this.excludeDrawnLayers && this.isDrawnLayer(layer.id)) return false;
+        if (this.excludeDrawnLayers && this.isDrawnLayer(layer.id))
+          return false;
         if (this.isExcludedByPattern(layer.id)) return false;
         return true;
       })
@@ -4897,29 +4747,29 @@ export class LayerControl implements IControl {
       }
     });
 
-    // UI shows top layer first, but we need to move layers in reverse order
-    // to maintain the correct stacking
-    const reversedIds = [...uiLayerIds].reverse();
-
-    // Build a set of MapLibre layer IDs for quick lookup
+    // uiLayerIds is the panel order top-to-bottom, where the top row is the
+    // top-most layer (highest z-index, rendered last / on top). MapLibre's
+    // moveLayer(id, beforeId) places `id` visually beneath `beforeId`, so
+    // iterating from the top of the panel downward and anchoring each layer
+    // beneath the previous one reproduces that stacking on the map: the first
+    // item goes to the top, each subsequent item just below it.
     const style = this.map.getStyle();
     const mapLibreLayerIds = new Set(style?.layers?.map((l) => l.id) || []);
 
-    // Move each layer to its correct position
-    for (let i = 0; i < reversedIds.length; i++) {
-      const layerId = reversedIds[i];
+    for (let i = 0; i < uiLayerIds.length; i++) {
+      const layerId = uiLayerIds[i];
 
-      // Check if layer exists in MapLibre (skip custom layers)
+      // Skip custom (non-MapLibre) layers; they are managed by their adapters.
       if (!mapLibreLayerIds.has(layerId)) {
         continue;
       }
 
-      // Find the next MapLibre layer to use as beforeId
-      // Skip any custom layers that might be between this layer and the next
+      // Anchor beneath the nearest higher (already-placed) MapLibre layer,
+      // skipping any custom layers between them.
       let beforeId: string | undefined = undefined;
       for (let j = i - 1; j >= 0; j--) {
-        if (mapLibreLayerIds.has(reversedIds[j])) {
-          beforeId = reversedIds[j];
+        if (mapLibreLayerIds.has(uiLayerIds[j])) {
+          beforeId = uiLayerIds[j];
           break;
         }
       }
