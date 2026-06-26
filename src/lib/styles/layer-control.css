@@ -665,6 +665,7 @@
 
 .style-editor-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
   padding-top: 8px;
@@ -672,8 +673,8 @@
 }
 
 .style-editor-button {
-  padding: 8px 16px;
-  min-width: 70px;
+  padding: 8px 12px;
+  min-width: 60px;
   border: 1px solid #ddd;
   border-radius: 3px;
   background: white;
@@ -694,43 +695,15 @@
   background: #e0e0e0;
 }
 
-.layer-control-style-editor .style-editor-button-reset {
-  background: #fb923c !important;
-  color: #ffffff !important;
-  border-color: #f97316 !important;
-  font-weight: 600;
-}
-
-.layer-control-style-editor .style-editor-button-reset:hover {
-  background: #f97316 !important;
-  border-color: #ea580c !important;
-  color: #ffffff !important;
-}
-
-.layer-control-style-editor .style-editor-button-close {
-  background: #6b7280 !important;
-  color: #ffffff !important;
-  border-color: #4b5563 !important;
-  font-weight: 600;
-}
-
-.layer-control-style-editor .style-editor-button-close:hover {
-  background: #4b5563 !important;
-  border-color: #374151 !important;
-  color: #ffffff !important;
-}
-
-.layer-control-style-editor .style-editor-button-remove {
-  background: #ef4444 !important;
-  color: #ffffff !important;
-  border-color: #dc2626 !important;
-  font-weight: 600;
-}
-
+/* The Reset / Remove / Close action buttons share the neutral base style above.
+   They intentionally drop the former orange/gray/red fills: consuming apps
+   reserve those signal colors for warnings and errors, so a standard action
+   button should not emit them. The destructive Remove action is confirmed via
+   an inline prompt and only hints its nature with a restrained red on hover. */
 .layer-control-style-editor .style-editor-button-remove:hover {
-  background: #dc2626 !important;
-  border-color: #b91c1c !important;
-  color: #ffffff !important;
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #b91c1c;
 }
 
 /* ===== Background Legend Panel ===== */
