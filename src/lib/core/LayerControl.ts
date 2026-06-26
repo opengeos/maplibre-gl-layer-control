@@ -99,6 +99,11 @@ export class LayerControl implements IControl {
   ) => void;
   private onLayerReorder?: (layerOrder: string[]) => void;
   private onLayerRemove?: (layerId: string) => void;
+  private onLayerStyleChange?: (
+    layerId: string,
+    property: string,
+    value: unknown,
+  ) => void;
   private onBackgroundVisibilityChange?: (visible: boolean) => void;
   private onBackgroundOpacityChange?: (opacity: number) => void;
 
@@ -129,6 +134,7 @@ export class LayerControl implements IControl {
     this.onLayerRename = options.onLayerRename;
     this.onLayerReorder = options.onLayerReorder;
     this.onLayerRemove = options.onLayerRemove;
+    this.onLayerStyleChange = options.onLayerStyleChange;
     this.onBackgroundVisibilityChange = options.onBackgroundVisibilityChange;
     this.onBackgroundOpacityChange = options.onBackgroundOpacityChange;
 
@@ -2640,7 +2646,7 @@ export class LayerControl implements IControl {
 
     const removeBtn = document.createElement("button");
     removeBtn.className = "style-editor-button style-editor-button-remove";
-    removeBtn.textContent = "Remove";
+    removeBtn.textContent = "Remove Layer";
     removeBtn.title = "Remove layer from map";
     removeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -2750,12 +2756,29 @@ export class LayerControl implements IControl {
 
     const resetBtn = document.createElement("button");
     resetBtn.className = "style-editor-button style-editor-button-reset";
-    resetBtn.textContent = "Reset";
+    resetBtn.textContent = "Reset Style";
     resetBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       // Reset all native sublayers
       for (const nativeId of nativeLayerIds) {
         restoreOriginalStyle(this.map, nativeId, this.state.originalStyles);
+      }
+      // Mirror the restored values to the host before the editor is rebuilt
+      // (closeStyleEditor clears the active editor and group mappings).
+      if (this.onLayerStyleChange) {
+        editor.querySelectorAll("[data-property]").forEach((el) => {
+          const control = el as HTMLElement;
+          const property = control.dataset.property;
+          const sourceId = control.dataset.layerId;
+          if (!property || !sourceId) return;
+          const value = this.map.getPaintProperty(sourceId, property);
+          if (value !== undefined) {
+            this.notifyLayerStyleChange(
+              property,
+              typeof value === "number" ? value : normalizeColor(value),
+            );
+          }
+        });
       }
       // Refresh the editor
       this.closeStyleEditor(layerId);
@@ -2764,7 +2787,7 @@ export class LayerControl implements IControl {
 
     const removeBtn = document.createElement("button");
     removeBtn.className = "style-editor-button style-editor-button-remove";
-    removeBtn.textContent = "Remove";
+    removeBtn.textContent = "Remove Layer";
     removeBtn.title = "Remove layer from map";
     removeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -2870,7 +2893,7 @@ export class LayerControl implements IControl {
 
     const resetBtn = document.createElement("button");
     resetBtn.className = "style-editor-button style-editor-button-reset";
-    resetBtn.textContent = "Reset";
+    resetBtn.textContent = "Reset Style";
     resetBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       this.resetLayerStyle(layerId);
@@ -2878,7 +2901,7 @@ export class LayerControl implements IControl {
 
     const removeBtn = document.createElement("button");
     removeBtn.className = "style-editor-button style-editor-button-remove";
-    removeBtn.textContent = "Remove";
+    removeBtn.textContent = "Remove Layer";
     removeBtn.title = "Remove layer from map";
     removeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -3306,6 +3329,89 @@ export class LayerControl implements IControl {
   }
 
   /**
+   * Notify the host that a paint property changed through the style editor.
+   * Reports the layer the active style editor belongs to (`activeStyleEditor`),
+   * not the internal native sub-layer id a control may edit, so consumers can
+   * map the change back to their own layer model.
+   */
+  private notifyLayerStyleChange(property: string, value: unknown): void {
+    const layerId = this.state.activeStyleEditor;
+    if (layerId && this.onLayerStyleChange) {
+      this.onLayerStyleChange(layerId, property, value);
+    }
+  }
+
+  /**
+   * Re-read an open style editor's controls from the current map paint so they
+   * reflect changes made elsewhere (e.g. an external sidebar writing the same
+   * paint properties). Setting input `.value` programmatically does not
+   * dispatch an `input` event, so this never re-triggers
+   * {@link LayerControlOptions.onLayerStyleChange}. The control the user is
+   * actively dragging (the focused input) is left untouched so the refresh
+   * does not fight an in-progress drag.
+   *
+   * @param layerId Restrict the refresh to one layer's editor. Defaults to the
+   *   currently active editor. No-op when that editor is not open.
+   */
+  public refreshStyleEditor(layerId?: string): void {
+    const targetId = layerId ?? this.state.activeStyleEditor;
+    if (!targetId) return;
+    const editor = this.styleEditors.get(targetId);
+    if (editor) {
+      this.syncStyleEditorControlsFromMap(editor);
+    }
+  }
+
+  /**
+   * Update every slider/color control in a style editor from the layer's
+   * current map paint. Each control records the layer it reads from in
+   * `dataset.layerId` (see createSliderControl/createColorControl).
+   */
+  private syncStyleEditorControlsFromMap(editor: HTMLElement): void {
+    const active = document.activeElement;
+
+    const sliders = editor.querySelectorAll(
+      ".style-control-slider",
+    ) as NodeListOf<HTMLInputElement>;
+    sliders.forEach((slider) => {
+      if (slider === active) return;
+      const property = slider.dataset.property;
+      const sourceId = slider.dataset.layerId;
+      if (!property || !sourceId) return;
+      const value = this.map.getPaintProperty(sourceId, property);
+      if (typeof value === "number") {
+        slider.value = String(value);
+        const valueDisplay = slider.parentElement?.querySelector(
+          ".style-control-value",
+        );
+        if (valueDisplay) {
+          const step = parseFloat(slider.step);
+          valueDisplay.textContent = formatNumericValue(value, step);
+        }
+      }
+    });
+
+    const colorPickers = editor.querySelectorAll(
+      ".style-control-color-picker",
+    ) as NodeListOf<HTMLInputElement>;
+    colorPickers.forEach((picker) => {
+      if (picker === active) return;
+      const property = picker.dataset.property;
+      const sourceId = picker.dataset.layerId;
+      if (!property || !sourceId) return;
+      const value = this.map.getPaintProperty(sourceId, property);
+      if (value !== undefined) {
+        const hexColor = normalizeColor(value);
+        picker.value = hexColor;
+        const hexDisplay = picker.parentElement?.querySelector(
+          ".style-control-color-value",
+        ) as HTMLInputElement | null;
+        if (hexDisplay) hexDisplay.value = hexColor;
+      }
+    });
+  }
+
+  /**
    * Create a color control
    */
   private createColorControl(
@@ -3330,6 +3436,10 @@ export class LayerControl implements IControl {
     colorInput.className = "style-control-color-picker";
     colorInput.value = initialValue;
     colorInput.dataset.property = property;
+    // The layer to read this property back from when refreshing the editor
+    // from the map (see refreshStyleEditor). For native sub-layer groups this
+    // is the primary group member; the rest stay in sync with it.
+    colorInput.dataset.layerId = layerId;
 
     const hexDisplay = document.createElement("input");
     hexDisplay.type = "text";
@@ -3344,6 +3454,7 @@ export class LayerControl implements IControl {
       for (const id of targetIds) {
         this.map.setPaintProperty(id, property, color);
       }
+      this.notifyLayerStyleChange(property, color);
     });
 
     inputWrapper.appendChild(colorInput);
@@ -3386,6 +3497,10 @@ export class LayerControl implements IControl {
     slider.step = String(step);
     slider.value = String(initialValue);
     slider.dataset.property = property;
+    // The layer to read this property back from when refreshing the editor
+    // from the map (see refreshStyleEditor). For native sub-layer groups this
+    // is the primary group member; the rest stay in sync with it.
+    slider.dataset.layerId = layerId;
 
     const valueDisplay = document.createElement("span");
     valueDisplay.className = "style-control-value";
@@ -3398,6 +3513,7 @@ export class LayerControl implements IControl {
       for (const id of targetIds) {
         this.map.setPaintProperty(id, property, value);
       }
+      this.notifyLayerStyleChange(property, value);
     });
 
     inputWrapper.appendChild(slider);
@@ -3440,6 +3556,7 @@ export class LayerControl implements IControl {
               const step = parseFloat(slider.step);
               valueDisplay.textContent = formatNumericValue(value, step);
             }
+            this.notifyLayerStyleChange(property, value);
           }
         }
       });
@@ -3458,10 +3575,11 @@ export class LayerControl implements IControl {
             // Update hex display
             const hexDisplay = picker.parentElement?.querySelector(
               ".style-control-color-value",
-            );
+            ) as HTMLInputElement | null;
             if (hexDisplay) {
-              hexDisplay.textContent = hexColor;
+              hexDisplay.value = hexColor;
             }
+            this.notifyLayerStyleChange(property, hexColor);
           }
         }
       });
