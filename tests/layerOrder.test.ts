@@ -331,4 +331,33 @@ describe("custom-layer order follows the native map stacking (issue #449)", () =
     );
     expect(order()).toEqual(["A", "B"]);
   });
+
+  it("keeps an unmapped custom layer in its adapter slot among mapped ones", () => {
+    // Adapter order bottom-to-top: A, B (hidden, no native layer), C, D
+    // (hidden), E. Unmapped layers must not jump to the top of the panel.
+    const { order } = makeCustomControl(
+      ["bg", "layer-A", "layer-C", "layer-E"],
+      { A: ["layer-A"], B: [], C: ["layer-C"], D: [], E: ["layer-E"] },
+      ["A", "B", "C", "D", "E"],
+    );
+    expect(order()).toEqual(["E", "D", "C", "B", "A"]);
+  });
+
+  it("anchors unmapped layers below the lowest mapped one and reads top-to-bottom lists", () => {
+    // Bottom of the adapter list is unmapped: they sit beneath A.
+    const bottomUp = makeCustomControl(
+      ["bg", "layer-A", "layer-B"],
+      { X: [], Y: [], A: ["layer-A"], B: ["layer-B"] },
+      ["X", "Y", "A", "B"],
+    );
+    expect(bottomUp.order()).toEqual(["B", "A", "Y", "X"]);
+
+    // The same stack listed top-to-bottom by the adapter.
+    const topDown = makeCustomControl(
+      ["bg", "layer-A", "layer-C"],
+      { C: ["layer-C"], B: [], A: ["layer-A"] },
+      ["C", "B", "A"],
+    );
+    expect(topDown.order()).toEqual(["C", "B", "A"]);
+  });
 });

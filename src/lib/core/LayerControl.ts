@@ -4298,9 +4298,8 @@ export class LayerControl implements IControl {
     // actual stacking order. Custom layers (e.g. deck.gl / raster adapters)
     // often expose a logical ID that differs from the underlying style layer
     // IDs, so look those up through the adapter (getNativeLayerIds) and use the
-    // top-most native layer's index. Custom layers with no resolvable native
-    // layer stay on top (Infinity), preserving their relative insertion order.
-    const mapIndexOf = (id: string): number => {
+    // top-most native layer's index.
+    const resolvedIndexOf = (id: string): number | undefined => {
       const direct = indexById.get(id);
       if (direct !== undefined) return direct;
 
@@ -4313,21 +4312,62 @@ export class LayerControl implements IControl {
         }
         if (best !== -1) return best;
       }
-
-      return Number.POSITIVE_INFINITY;
+      return undefined;
     };
 
-    // Sort by map index descending (high index = top of UI), keeping the
-    // original insertion order as a stable tiebreaker (notably for unresolved
-    // custom layers that all share an Infinity index).
+    // A custom layer with no native layer on the map yet (hidden or still
+    // loading) keeps its slot in its adapter's list: it sits just above the
+    // nearest resolved layer beneath it in that list, or just below the nearest
+    // one above it. `offset` orders several unresolved layers sharing an
+    // anchor. Adapter lists are read bottom-to-top (like style.layers) unless
+    // their resolved layers show they run top-to-bottom. An adapter with no
+    // resolved layer at all keeps its layers on top (Infinity), preserving
+    // their relative insertion order.
+    const anchors = new Map<string, { mapIndex: number; offset: number }>();
+    for (const group of this.customLayerRegistry?.getLayerIdGroups() ?? []) {
+      const resolved = group.map(resolvedIndexOf);
+      const known = resolved.filter((idx): idx is number => idx !== undefined);
+      if (known.length === 0) continue;
+      const ids = known[0] > known[known.length - 1] ? [...group].reverse() : group;
+      const indexes = ids === group ? resolved : [...resolved].reverse();
+      ids.forEach((id, position) => {
+        if (indexes[position] !== undefined) return;
+        for (let below = position - 1; below >= 0; below--) {
+          const idx = indexes[below];
+          if (idx !== undefined) {
+            anchors.set(id, { mapIndex: idx, offset: position - below });
+            return;
+          }
+        }
+        for (let above = position + 1; above < ids.length; above++) {
+          const idx = indexes[above];
+          if (idx !== undefined) {
+            anchors.set(id, { mapIndex: idx, offset: position - above });
+            return;
+          }
+        }
+      });
+    }
+
+    const positionOf = (id: string): { mapIndex: number; offset: number } => {
+      const resolved = resolvedIndexOf(id);
+      if (resolved !== undefined) return { mapIndex: resolved, offset: 0 };
+      return anchors.get(id) ?? { mapIndex: Number.POSITIVE_INFINITY, offset: 0 };
+    };
+
+    // Sort by map index descending (high index = top of UI), then by offset
+    // from an anchor, keeping the original insertion order as a stable
+    // tiebreaker (notably for unresolved custom layers that all share an
+    // Infinity index).
     return userLayerIds
       .map((id, insertionIndex) => ({
         id,
         insertionIndex,
-        mapIndex: mapIndexOf(id),
+        ...positionOf(id),
       }))
       .sort((a, b) => {
         if (a.mapIndex !== b.mapIndex) return a.mapIndex > b.mapIndex ? -1 : 1;
+        if (a.offset !== b.offset) return b.offset - a.offset;
         return a.insertionIndex - b.insertionIndex;
       })
       .map((entry) => entry.id);

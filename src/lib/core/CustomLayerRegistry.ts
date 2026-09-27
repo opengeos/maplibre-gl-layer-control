@@ -52,6 +52,14 @@ export class CustomLayerRegistry {
   }
 
   /**
+   * Get each adapter's layer IDs as a separate list, in adapter order.
+   * @returns One array of layer IDs per registered adapter
+   */
+  getLayerIdGroups(): string[][] {
+    return Array.from(this.adapters.values(), (adapter) => adapter.getLayerIds());
+  }
+
+  /**
    * Check if a layer ID is managed by any adapter.
    * @param layerId The layer ID to check
    * @returns true if the layer is managed by an adapter
