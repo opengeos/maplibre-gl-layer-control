@@ -4349,7 +4349,7 @@ export class LayerControl implements IControl {
       });
     }
 
-    const positionOf = (id: string): { mapIndex: number; offset: number } => {
+    const stackKeyOf = (id: string): { mapIndex: number; offset: number } => {
       const resolved = resolvedIndexOf(id);
       if (resolved !== undefined) return { mapIndex: resolved, offset: 0 };
       return anchors.get(id) ?? { mapIndex: Number.POSITIVE_INFINITY, offset: 0 };
@@ -4363,7 +4363,7 @@ export class LayerControl implements IControl {
       .map((id, insertionIndex) => ({
         id,
         insertionIndex,
-        ...positionOf(id),
+        ...stackKeyOf(id),
       }))
       .sort((a, b) => {
         if (a.mapIndex !== b.mapIndex) return a.mapIndex > b.mapIndex ? -1 : 1;
