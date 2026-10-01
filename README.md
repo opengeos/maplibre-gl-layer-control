@@ -29,6 +29,7 @@ A comprehensive layer control for MapLibre GL with advanced styling capabilities
 - ✅ **TypeScript** - Full type safety and IntelliSense support
 - ✅ **React integration** - Optional React components and hooks
 - ✅ **Custom layer adapters** - Integrate non-MapLibre layers (deck.gl, Zarr, etc.)
+- ✅ **Layer groups** - Nest an adapter's layers in collapsible, nestable folders with their own visibility checkbox and opacity slider
 
 ## Installation
 
@@ -468,6 +469,36 @@ map.addControl(layerControl, 'top-right');
 deckLayers.set('my-deck-layer', myDeckLayer);
 deckAdapter.notifyLayerAdded('my-deck-layer');
 ```
+
+#### Layer Groups
+
+An adapter can organize its layers into collapsible folders by implementing the optional group methods. The panel then nests each layer under its group, nested groups included, and gives every group a collapse toggle, a visibility checkbox, and an opacity slider.
+
+```typescript
+interface LayerGroupState {
+  id: string;
+  name: string;
+  parentId?: string; // enclosing group; omit for a top-level group
+  visible: boolean;
+  opacity: number; // 0-1
+  collapsed: boolean;
+}
+
+interface CustomLayerAdapter {
+  // ...the methods above, plus:
+  getGroups?(): LayerGroupState[];
+  getLayerGroupId?(layerId: string): string | undefined;
+  setGroupVisibility?(groupId: string, visible: boolean): void;
+  setGroupOpacity?(groupId: string, opacity: number): void;
+  setGroupCollapsed?(groupId: string, collapsed: boolean): void;
+}
+```
+
+- A group's `visible` and `opacity` are its own settings. The control shows and edits them, but it never folds them into the layer rows or applies them to the map: hiding or fading a group's layers is the adapter's job (for example, by ANDing the group's visibility into each child's).
+- A group renders at the position of its top-most layer. Groups with no layers, directly or through a nested group, are not shown.
+- Drag-and-drop and the context-menu moves keep a layer inside its own group, where a nested group counts as one block (a layer moves past it whole). Groups themselves cannot be dragged.
+- **Show All** / **Hide All** also show or hide every group.
+- When groups change outside the control, call `layerControl.refreshGroups()`. It rebuilds the panel when a group was added, removed, or re-parented, or a layer changed group, and otherwise updates the group rows in place.
 
 #### Limitations
 

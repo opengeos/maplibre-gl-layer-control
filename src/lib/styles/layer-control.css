@@ -287,13 +287,13 @@
 
 /* Style button */
 .layer-control-style-button {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   border-radius: 4px;
   border: none;
   background: none;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 12px;
   color: #444;
   display: flex;
   align-items: center;
@@ -577,14 +577,14 @@
 /* Style button */
 .layer-control-style-button {
   flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   border: 1px solid #ddd;
   border-radius: 3px;
   background: white;
   color: #666;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 12px;
   padding: 0;
   line-height: 1;
   transition: all 0.2s ease;
@@ -1062,6 +1062,59 @@
 
 .layer-control-name-input:focus {
   box-shadow: 0 0 0 2px rgba(47, 111, 237, 0.2);
+}
+
+/* ===== Layer Groups ===== */
+.layer-control-group {
+  box-sizing: border-box;
+}
+
+.layer-control-group-row {
+  padding: 4px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.layer-control-group-name {
+  font-weight: 600;
+}
+
+.layer-control-group-toggle {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #666;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.layer-control-group-toggle svg {
+  width: 12px;
+  height: 12px;
+  transform: rotate(90deg);
+  transition: transform 0.15s ease;
+}
+
+.layer-control-group.collapsed > .layer-control-group-row .layer-control-group-toggle svg {
+  transform: rotate(0deg);
+}
+
+.layer-control-group-children {
+  padding-left: 14px;
+  box-sizing: border-box;
+}
+
+.layer-control-group.collapsed > .layer-control-group-children {
+  display: none;
+}
+
+/* A hidden group hides its layers on the map, so dim their rows */
+.layer-control-group-hidden > .layer-control-group-children {
+  opacity: 0.55;
 }
 
 /* ===== Drag and Drop Styles ===== */

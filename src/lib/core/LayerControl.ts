@@ -10,6 +10,7 @@ import type {
   OriginalStyle,
   InternalControlState,
   CustomLayerAdapter,
+  LayerGroupState,
   BackgroundLayerVisibility,
   BackgroundPresets,
 } from "./types";
@@ -70,6 +71,10 @@ export class LayerControl implements IControl {
   private customLayerUnsubscribe: (() => void) | null = null;
   private removedCustomLayerIds: Set<string> = new Set();
   private nativeLayerGroups: Map<string, string[]> = new Map();
+  /** Layer groups from the custom layer adapters, as of the last panel build */
+  private groupStates: Map<string, LayerGroupState> = new Map();
+  /** Group IDs, parents, and memberships the panel was last built from */
+  private groupStructureKey = "";
   private basemapStyleUrl: string | null = null;
   private basemapLayerIds: Set<string> | null = null;
   private widthFrame: number | null = null;
@@ -1062,6 +1067,12 @@ export class LayerControl implements IControl {
    * Set visibility of all layers
    */
   private setAllLayersVisibility(visible: boolean): void {
+    // A hidden group would keep its layers hidden, so Show All / Hide All
+    // covers the groups as well.
+    this.groupStates.forEach((_group, groupId) => {
+      this.setGroupVisibility(groupId, visible);
+    });
+
     Object.keys(this.state.layerStates).forEach((layerId) => {
       // Use toggleLayerVisibility which handles both native and custom layers
       this.toggleLayerVisibility(layerId, visible);
@@ -1242,8 +1253,10 @@ export class LayerControl implements IControl {
    * Build layer items (called initially and when layers change)
    */
   private buildLayerItems(): void {
-    // Clear existing items
-    const existingItems = this.panel.querySelectorAll(".layer-control-item");
+    // Clear existing items (a group element takes its nested items with it)
+    const existingItems = this.panel.querySelectorAll(
+      ".layer-control-item, .layer-control-group",
+    );
     existingItems.forEach((item) => item.remove());
     this.styleEditors.clear();
 
@@ -1270,6 +1283,18 @@ export class LayerControl implements IControl {
       orderedLayerIds.push("Background");
     }
 
+    this.groupStates = new Map(
+      (this.customLayerRegistry?.getGroups() ?? []).map((group) => [
+        group.id,
+        { ...group },
+      ]),
+    );
+    this.groupStructureKey = this.computeGroupStructureKey(this.groupStates);
+
+    // Group elements created so far in this build, keyed by group ID, so each
+    // group renders once, at the position of its top-most layer.
+    const groupContainers = new Map<string, HTMLElement>();
+
     // Add items for all layers in our state. The Background group is a synthetic
     // entry (not a real target layer), so it always renders when present even
     // when an explicit targetLayers list is in use; otherwise restricting the
@@ -1284,15 +1309,336 @@ export class LayerControl implements IControl {
         this.targetLayers.length === 0 ||
         this.targetLayers.includes(layerId)
       ) {
-        this.addLayerItem(layerId, state);
+        const container =
+          layerId === "Background"
+            ? this.panel
+            : this.getGroupContainer(
+                this.getLayerGroupIdOf(layerId),
+                groupContainers,
+                new Set(),
+              );
+        this.addLayerItem(layerId, state, container);
       }
+    });
+  }
+
+  /**
+   * Get the ID of the group a layer belongs to, ignoring a group ID that no
+   * adapter defines.
+   * @param layerId The layer ID
+   * @returns The group ID, or undefined when the layer is ungrouped
+   */
+  private getLayerGroupIdOf(layerId: string): string | undefined {
+    if (this.groupStates.size === 0) return undefined;
+    const groupId = this.customLayerRegistry?.getLayerGroupId(layerId);
+    return groupId !== undefined && this.groupStates.has(groupId)
+      ? groupId
+      : undefined;
+  }
+
+  /**
+   * Get the element a group's rows go into, creating the group (and any
+   * enclosing groups) on first use.
+   * @param groupId The group ID, or undefined for the panel's top level
+   * @param containers Group child containers already created in this build
+   * @param visiting Groups on the current parent chain, to stop on a cycle
+   * @returns The element to append the group's rows to
+   */
+  private getGroupContainer(
+    groupId: string | undefined,
+    containers: Map<string, HTMLElement>,
+    visiting: Set<string>,
+  ): HTMLElement {
+    if (groupId === undefined) return this.panel;
+    const existing = containers.get(groupId);
+    if (existing) return existing;
+    const group = this.groupStates.get(groupId);
+    if (!group || visiting.has(groupId)) return this.panel;
+    visiting.add(groupId);
+
+    const parentId =
+      group.parentId !== undefined && this.groupStates.has(group.parentId)
+        ? group.parentId
+        : undefined;
+    const parent = this.getGroupContainer(parentId, containers, visiting);
+    const { element, children } = this.createGroupItem(group);
+    parent.appendChild(element);
+    containers.set(groupId, children);
+    return children;
+  }
+
+  /**
+   * Summarize the group structure the panel is built from: each group's ID
+   * and parent, and each layer's group. A change to any of these needs a
+   * rebuild; a change to a group's name, visibility, opacity, or collapsed
+   * state does not.
+   * @param groups The groups to summarize
+   * @returns A string that changes whenever the structure does
+   */
+  private computeGroupStructureKey(groups: Map<string, LayerGroupState>): string {
+    if (groups.size === 0) return "";
+    const memberships = Object.keys(this.state.layerStates)
+      .filter((layerId) => layerId !== "Background")
+      .map((layerId) => [
+        layerId,
+        this.customLayerRegistry?.getLayerGroupId(layerId) ?? null,
+      ]);
+    return JSON.stringify({
+      groups: Array.from(groups.values(), (group) => [
+        group.id,
+        group.parentId ?? null,
+      ]),
+      memberships,
+    });
+  }
+
+  /**
+   * Create the element for a layer group: a header row with a collapse
+   * toggle, visibility checkbox, name, and opacity slider, followed by a
+   * container for the group's layers and nested groups.
+   * @param group The group to render
+   * @returns The group element and its child container
+   */
+  private createGroupItem(group: LayerGroupState): {
+    element: HTMLElement;
+    children: HTMLElement;
+  } {
+    const element = document.createElement("div");
+    element.className = "layer-control-group";
+    element.setAttribute("data-group-id", group.id);
+
+    const row = document.createElement("div");
+    row.className = "layer-control-row layer-control-group-row";
+
+    // Groups are not draggable; keep the rows aligned with the layer rows.
+    if (this.enableDragAndDrop) {
+      row.appendChild(this.createDisabledDragHandle());
+    }
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.className = "layer-control-checkbox layer-control-group-checkbox";
+    checkbox.addEventListener("change", () => {
+      this.setGroupVisibility(group.id, checkbox.checked);
+    });
+    row.appendChild(checkbox);
+
+    if (this.showLayerSymbol) {
+      const symbol = document.createElement("span");
+      symbol.className = "layer-control-symbol layer-control-group-symbol";
+      symbol.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M1.5 3.5h4.5l1.5 1.5h7v8.5h-13z" fill="#f2c94c" stroke="#b8902a" stroke-width="1"/>
+      </svg>`;
+      symbol.title = "Layer group";
+      row.appendChild(symbol);
+    }
+
+    const name = document.createElement("span");
+    name.className = "layer-control-name layer-control-group-name";
+    row.appendChild(name);
+
+    if (this.showOpacitySlider) {
+      const opacity = document.createElement("input");
+      opacity.type = "range";
+      opacity.className = "layer-control-opacity layer-control-group-opacity";
+      opacity.min = "0";
+      opacity.max = "1";
+      opacity.step = "0.01";
+      opacity.addEventListener("mousedown", () => {
+        this.state.userInteractingWithSlider = true;
+      });
+      opacity.addEventListener("mouseup", () => {
+        this.state.userInteractingWithSlider = false;
+      });
+      opacity.addEventListener("input", () => {
+        this.setGroupOpacity(group.id, parseFloat(opacity.value));
+      });
+      row.appendChild(opacity);
+    }
+
+    // The collapse toggle sits at the end of the row, in the slot the layer
+    // rows give their style button, so the group's checkbox and slider line
+    // up with the layers' own.
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "layer-control-group-toggle";
+    toggle.innerHTML = `<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M6 4l4 4-4 4z"/>
+    </svg>`;
+    toggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.setGroupCollapsed(group.id, !this.groupStates.get(group.id)?.collapsed);
+    });
+    row.appendChild(toggle);
+
+    const children = document.createElement("div");
+    children.className = "layer-control-group-children";
+
+    element.appendChild(row);
+    element.appendChild(children);
+    this.updateGroupElement(element, group);
+
+    return { element, children };
+  }
+
+  /**
+   * Show a group's state on its element.
+   * @param element The group element
+   * @param group The group state to show
+   */
+  private updateGroupElement(element: HTMLElement, group: LayerGroupState): void {
+    element.classList.toggle("collapsed", group.collapsed);
+    element.classList.toggle("layer-control-group-hidden", !group.visible);
+
+    const row = element.querySelector(":scope > .layer-control-group-row");
+    if (!row) return;
+
+    const toggle = row.querySelector(
+      ".layer-control-group-toggle",
+    ) as HTMLButtonElement | null;
+    if (toggle) {
+      toggle.setAttribute("aria-expanded", String(!group.collapsed));
+      toggle.title = group.collapsed ? "Expand group" : "Collapse group";
+      toggle.setAttribute(
+        "aria-label",
+        `${group.collapsed ? "Expand" : "Collapse"} ${group.name}`,
+      );
+    }
+
+    const checkbox = row.querySelector(
+      ".layer-control-group-checkbox",
+    ) as HTMLInputElement | null;
+    if (checkbox) checkbox.checked = group.visible;
+
+    const name = row.querySelector(".layer-control-group-name") as HTMLElement | null;
+    if (name) {
+      name.textContent = group.name;
+      name.title = group.name;
+    }
+
+    const opacity = row.querySelector(
+      ".layer-control-group-opacity",
+    ) as HTMLInputElement | null;
+    if (opacity) {
+      opacity.value = String(group.opacity);
+      opacity.title = `Opacity: ${Math.round(group.opacity * 100)}%`;
+    }
+  }
+
+  /**
+   * Get the element of a rendered group.
+   * @param groupId The group ID
+   * @returns The group element, or null when the group is not rendered
+   */
+  private getGroupElement(groupId: string): HTMLElement | null {
+    const groups = this.panel.querySelectorAll(".layer-control-group");
+    for (const element of Array.from(groups)) {
+      if ((element as HTMLElement).dataset.groupId === groupId) {
+        return element as HTMLElement;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Remove group elements left without any layer row, e.g. after their last
+   * layer was removed.
+   */
+  private pruneEmptyGroups(): void {
+    const groups = Array.from(this.panel.querySelectorAll(".layer-control-group"));
+    // Innermost groups come last in document order; prune them first so an
+    // enclosing group emptied by the removal is pruned too.
+    for (const element of groups.reverse()) {
+      if (!element.querySelector(".layer-control-item")) element.remove();
+    }
+  }
+
+  /**
+   * Set a group's visibility from the panel and report it to its adapter.
+   * @param groupId The group ID
+   * @param visible Whether the group should be visible
+   */
+  private setGroupVisibility(groupId: string, visible: boolean): void {
+    const group = this.groupStates.get(groupId);
+    if (!group) return;
+    group.visible = visible;
+    const element = this.getGroupElement(groupId);
+    if (element) this.updateGroupElement(element, group);
+
+    this.state.isStyleOperationInProgress = true;
+    this.customLayerRegistry?.setGroupVisibility(groupId, visible);
+    setTimeout(() => {
+      this.state.isStyleOperationInProgress = false;
+    }, 200);
+  }
+
+  /**
+   * Set a group's opacity from the panel and report it to its adapter.
+   * @param groupId The group ID
+   * @param opacity The opacity value (0-1)
+   */
+  private setGroupOpacity(groupId: string, opacity: number): void {
+    const group = this.groupStates.get(groupId);
+    if (!group) return;
+    group.opacity = opacity;
+    const element = this.getGroupElement(groupId);
+    if (element) this.updateGroupElement(element, group);
+
+    this.state.isStyleOperationInProgress = true;
+    this.customLayerRegistry?.setGroupOpacity(groupId, opacity);
+    setTimeout(() => {
+      this.state.isStyleOperationInProgress = false;
+    }, 200);
+  }
+
+  /**
+   * Collapse or expand a group in the panel and report it to its adapter.
+   * @param groupId The group ID
+   * @param collapsed Whether the group should be collapsed
+   */
+  private setGroupCollapsed(groupId: string, collapsed: boolean): void {
+    const group = this.groupStates.get(groupId);
+    if (!group) return;
+    group.collapsed = collapsed;
+    const element = this.getGroupElement(groupId);
+    if (element) this.updateGroupElement(element, group);
+    this.customLayerRegistry?.setGroupCollapsed(groupId, collapsed);
+  }
+
+  /**
+   * Re-read the layer groups from the custom layer adapters. Call this after
+   * groups change outside the control. The panel is rebuilt when a group was
+   * added, removed, or re-parented, or a layer changed group; otherwise the
+   * group rows' name, visibility, opacity, and collapsed state are updated in
+   * place.
+   */
+  refreshGroups(): void {
+    if (!this.panel) return;
+    const next = new Map(
+      (this.customLayerRegistry?.getGroups() ?? []).map((group) => [
+        group.id,
+        { ...group },
+      ]),
+    );
+    if (this.computeGroupStructureKey(next) !== this.groupStructureKey) {
+      this.buildLayerItems();
+      return;
+    }
+    this.groupStates = next;
+    next.forEach((group, groupId) => {
+      const element = this.getGroupElement(groupId);
+      if (element) this.updateGroupElement(element, group);
     });
   }
 
   /**
    * Add a single layer item to the panel
    */
-  private addLayerItem(layerId: string, state: LayerState): void {
+  private addLayerItem(
+    layerId: string,
+    state: LayerState,
+    container: HTMLElement = this.panel,
+  ): void {
     const item = document.createElement("div");
     item.className = "layer-control-item";
     item.setAttribute("data-layer-id", layerId);
@@ -1403,7 +1749,7 @@ export class LayerControl implements IControl {
       });
     }
 
-    this.panel.appendChild(item);
+    container.appendChild(item);
   }
 
   /**
@@ -3902,6 +4248,8 @@ export class LayerControl implements IControl {
       // appended below the Background group.
       if (layersAdded) {
         this.buildLayerItems();
+      } else {
+        this.pruneEmptyGroups();
       }
     } catch (error) {
       console.warn("Failed to check for new layers:", error);
@@ -4408,6 +4756,11 @@ export class LayerControl implements IControl {
    * Move a layer up in UI (higher rendering order = move to higher z-index)
    */
   private moveLayerUp(layerId: string): void {
+    if (this.groupStates.size > 0) {
+      this.moveLayerWithinGroup(layerId, "up");
+      return;
+    }
+
     const layerIds = this.getUserLayerIdsInMapOrder();
     const index = layerIds.indexOf(layerId);
     if (index <= 0) return; // Already at top or not found
@@ -4463,6 +4816,11 @@ export class LayerControl implements IControl {
    * Move a layer to the top (highest rendering order)
    */
   private moveLayerToTop(layerId: string): void {
+    if (this.groupStates.size > 0) {
+      this.moveLayerWithinGroup(layerId, "top");
+      return;
+    }
+
     const layerIds = this.getUserLayerIdsInMapOrder();
     const index = layerIds.indexOf(layerId);
     if (index <= 0) return; // Already at top or not found
@@ -4505,6 +4863,11 @@ export class LayerControl implements IControl {
    * Move a layer down in UI (lower rendering order = move to lower z-index)
    */
   private moveLayerDown(layerId: string): void {
+    if (this.groupStates.size > 0) {
+      this.moveLayerWithinGroup(layerId, "down");
+      return;
+    }
+
     const layerIds = this.getUserLayerIdsInMapOrder();
     const index = layerIds.indexOf(layerId);
     if (index < 0 || index >= layerIds.length - 1) return; // Already at bottom or not found
@@ -4556,6 +4919,11 @@ export class LayerControl implements IControl {
    * Move a layer to the bottom (lowest rendering order among user layers)
    */
   private moveLayerToBottom(layerId: string): void {
+    if (this.groupStates.size > 0) {
+      this.moveLayerWithinGroup(layerId, "bottom");
+      return;
+    }
+
     const layerIds = this.getUserLayerIdsInMapOrder();
     if (layerIds.length <= 1) return;
 
@@ -4604,6 +4972,100 @@ export class LayerControl implements IControl {
     // Rebuild UI
     this.buildLayerItems();
     this.onLayerReorder?.(this.getUserLayerIdsInMapOrder());
+  }
+
+  /**
+   * Move a layer within its own group (or among the top-level rows), so the
+   * context-menu moves never carry it out of its group. A nested group counts
+   * as one block: moving up or down steps past the whole block.
+   * @param layerId The layer ID
+   * @param direction Where to move the layer within its group
+   */
+  private moveLayerWithinGroup(
+    layerId: string,
+    direction: "up" | "down" | "top" | "bottom",
+  ): void {
+    const order = this.getUserLayerIdsInMapOrder();
+    const groupId = this.getLayerGroupIdOf(layerId);
+
+    // Split the group's rows, top to bottom, into blocks: each direct layer is
+    // a block of its own, and each nested group's layers form one block.
+    const blocks: { key: string; ids: string[] }[] = [];
+    for (const id of order) {
+      const key = this.getChildKeyWithin(id, groupId);
+      if (key === null) continue;
+      const lastBlock = blocks[blocks.length - 1];
+      if (lastBlock && lastBlock.key === key && key !== `layer:${id}`) {
+        lastBlock.ids.push(id);
+      } else {
+        blocks.push({ key, ids: [id] });
+      }
+    }
+
+    const position = blocks.findIndex((block) => block.key === `layer:${layerId}`);
+    const last = blocks.length - 1;
+    if (position < 0) return;
+    if ((direction === "up" || direction === "top") && position === 0) return;
+    if ((direction === "down" || direction === "bottom") && position === last) {
+      return;
+    }
+
+    // Take the layer out and put it back just above (up/top) or just below
+    // (down/bottom) the block it moves past.
+    const above = direction === "up" || direction === "top";
+    const block = {
+      up: blocks[position - 1],
+      top: blocks[0],
+      down: blocks[position + 1],
+      bottom: blocks[last],
+    }[direction];
+    const anchor = above ? block.ids[0] : block.ids[block.ids.length - 1];
+    const next = order.filter((id) => id !== layerId);
+    const anchorIndex = next.indexOf(anchor);
+    next.splice(above ? anchorIndex : anchorIndex + 1, 0, layerId);
+
+    const newLayerStates: { [key: string]: LayerState } = {};
+    if (this.state.layerStates["Background"]) {
+      newLayerStates["Background"] = this.state.layerStates["Background"];
+    }
+    next.forEach((id) => {
+      if (this.state.layerStates[id]) {
+        newLayerStates[id] = this.state.layerStates[id];
+      }
+    });
+    this.state.layerStates = newLayerStates;
+
+    this.applyLayerOrderToMap(next);
+    this.buildLayerItems();
+    this.onLayerReorder?.(next);
+  }
+
+  /**
+   * Identify which row of a group a layer falls under: the layer itself when
+   * it belongs to the group directly, or the nested group that holds it.
+   * @param layerId The layer ID
+   * @param groupId The group, or undefined for the panel's top level
+   * @returns `layer:<id>` or `group:<id>`, or null when the layer is not
+   *   inside the group at all
+   */
+  private getChildKeyWithin(
+    layerId: string,
+    groupId: string | undefined,
+  ): string | null {
+    let current = this.getLayerGroupIdOf(layerId);
+    if (current === groupId) return `layer:${layerId}`;
+    const visited = new Set<string>();
+    while (current !== undefined && !visited.has(current)) {
+      visited.add(current);
+      const parentId = this.groupStates.get(current)?.parentId;
+      const parent =
+        parentId !== undefined && this.groupStates.has(parentId)
+          ? parentId
+          : undefined;
+      if (parent === groupId) return `group:${current}`;
+      current = parent;
+    }
+    return null;
   }
 
   /**
@@ -4725,6 +5187,7 @@ export class LayerControl implements IControl {
     if (itemEl) {
       itemEl.remove();
     }
+    this.pruneEmptyGroups();
 
     // Call callback
     this.onLayerRemove?.(layerId);
@@ -4857,11 +5320,18 @@ export class LayerControl implements IControl {
     this.state.drag.startY = e.clientY;
     this.state.drag.currentY = e.clientY;
 
-    // Get all layer items (excluding the one being dragged and Background)
-    const items = Array.from(
-      this.panel.querySelectorAll(".layer-control-item:not(.dragging)"),
-    ).filter(
-      (item) => (item as HTMLElement).dataset.layerId !== "Background",
+    // Get the rows the placeholder may move among: the dragged layer's own
+    // siblings (they share the placeholder's parent element), whether layers
+    // or nested groups, except the dragged item itself and Background. A drag
+    // therefore never carries a layer into or out of a group; dropping on a
+    // nested group places the layer above or below that whole group.
+    const scope = placeholder.parentElement;
+    const items = Array.from(scope?.children ?? []).filter(
+      (item) =>
+        (item.classList.contains("layer-control-item") ||
+          item.classList.contains("layer-control-group")) &&
+        !item.classList.contains("dragging") &&
+        (item as HTMLElement).dataset.layerId !== "Background",
     ) as HTMLElement[];
 
     // Find which item we're hovering over
@@ -4954,10 +5424,6 @@ export class LayerControl implements IControl {
    * Apply UI order to map layers
    */
   private applyUIOrderToMap(): void {
-    // Set flag to prevent checkForNewLayers from running during reordering
-    // This prevents custom layers from being incorrectly deleted due to race conditions
-    this.state.isStyleOperationInProgress = true;
-
     // Get layer items in current UI order
     const items = this.panel.querySelectorAll(".layer-control-item");
     const uiLayerIds: string[] = [];
@@ -4968,6 +5434,21 @@ export class LayerControl implements IControl {
         uiLayerIds.push(layerId);
       }
     });
+
+    this.applyLayerOrderToMap(uiLayerIds);
+
+    // Call callback
+    this.onLayerReorder?.(uiLayerIds);
+  }
+
+  /**
+   * Restack the map's MapLibre layers to match a panel order.
+   * @param uiLayerIds User layer IDs top-to-bottom, as the panel lists them
+   */
+  private applyLayerOrderToMap(uiLayerIds: string[]): void {
+    // Set flag to prevent checkForNewLayers from running during reordering
+    // This prevents custom layers from being incorrectly deleted due to race conditions
+    this.state.isStyleOperationInProgress = true;
 
     // uiLayerIds is the panel order top-to-bottom, where the top row is the
     // top-most layer (highest z-index, rendered last / on top). MapLibre's
@@ -5002,9 +5483,6 @@ export class LayerControl implements IControl {
         // Ignore errors
       }
     }
-
-    // Call callback
-    this.onLayerReorder?.(uiLayerIds);
 
     // Clear flag after styledata events have settled
     // The 200ms delay accounts for the 100ms timeout in the styledata event handler

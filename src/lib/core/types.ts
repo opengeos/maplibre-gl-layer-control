@@ -37,6 +37,31 @@ export interface PartialLayerStates {
 }
 
 /**
+ * A collapsible folder of layers in the panel. Supplied by a
+ * {@link CustomLayerAdapter} through `getGroups`; layers join a group through
+ * the adapter's `getLayerGroupId`.
+ *
+ * A group's `visible` and `opacity` are its own settings, separate from those
+ * of its layers. The control shows and edits them but never folds them into
+ * the layer rows: applying a hidden or translucent group to its layers on the
+ * map is the adapter's job.
+ */
+export interface LayerGroupState {
+  /** Unique group ID */
+  id: string;
+  /** Display name for the group */
+  name: string;
+  /** ID of the enclosing group, or undefined for a top-level group */
+  parentId?: string;
+  /** Whether the group is visible */
+  visible: boolean;
+  /** Group opacity (0-1) */
+  opacity: number;
+  /** Whether the group's rows are folded away in the panel */
+  collapsed: boolean;
+}
+
+/**
  * Adapter interface for custom (non-MapLibre) layers.
  * Implement this interface to integrate custom layer types (e.g., deck.gl layers)
  * with the layer control.
@@ -87,6 +112,35 @@ export interface CustomLayerAdapter {
    * for these native layers instead of the generic "custom layer" message.
    */
   getNativeLayerIds?(layerId: string): string[];
+
+  /**
+   * Get the layer groups this adapter defines (optional). When any adapter
+   * returns groups, the panel nests each layer under its group (see
+   * {@link getLayerGroupId}) as collapsible folders, and drag-and-drop and the
+   * context-menu moves keep a layer among the other layers of its own group.
+   * Groups that contain no layer, directly or through a nested group, are not
+   * shown.
+   */
+  getGroups?(): LayerGroupState[];
+
+  /**
+   * Get the ID of the group a layer belongs to, or undefined when the layer
+   * sits at the top level (optional; required for groups to have members).
+   */
+  getLayerGroupId?(layerId: string): string | undefined;
+
+  /** Set group visibility (optional; called from the group's checkbox). */
+  setGroupVisibility?(groupId: string, visible: boolean): void;
+
+  /** Set group opacity (0-1) (optional; called from the group's slider). */
+  setGroupOpacity?(groupId: string, opacity: number): void;
+
+  /**
+   * Record that a group was collapsed or expanded in the panel (optional).
+   * Without it the control still folds the group, but only until the panel is
+   * rebuilt from the adapter's `getGroups`.
+   */
+  setGroupCollapsed?(groupId: string, collapsed: boolean): void;
 }
 
 /**
