@@ -4809,7 +4809,10 @@ export class LayerControl implements IControl {
 
     // Rebuild UI
     this.buildLayerItems();
-    this.onLayerReorder?.(this.getUserLayerIdsInMapOrder());
+    // Report the order the move asked for. The map order would not show it
+    // for a custom layer: those are left to the adapter to restack, so the
+    // map still has the old order at this point.
+    this.onLayerReorder?.(orderedIds);
   }
 
   /**
@@ -4856,7 +4859,10 @@ export class LayerControl implements IControl {
 
     // Rebuild UI
     this.buildLayerItems();
-    this.onLayerReorder?.(this.getUserLayerIdsInMapOrder());
+    // Report the order the move asked for. The map order would not show it
+    // for a custom layer: those are left to the adapter to restack, so the
+    // map still has the old order at this point.
+    this.onLayerReorder?.(orderedIds);
   }
 
   /**
@@ -4912,7 +4918,10 @@ export class LayerControl implements IControl {
 
     // Rebuild UI
     this.buildLayerItems();
-    this.onLayerReorder?.(this.getUserLayerIdsInMapOrder());
+    // Report the order the move asked for. The map order would not show it
+    // for a custom layer: those are left to the adapter to restack, so the
+    // map still has the old order at this point.
+    this.onLayerReorder?.(orderedIds);
   }
 
   /**
@@ -4971,7 +4980,10 @@ export class LayerControl implements IControl {
 
     // Rebuild UI
     this.buildLayerItems();
-    this.onLayerReorder?.(this.getUserLayerIdsInMapOrder());
+    // Report the order the move asked for. The map order would not show it
+    // for a custom layer: those are left to the adapter to restack, so the
+    // map still has the old order at this point.
+    this.onLayerReorder?.(orderedIds);
   }
 
   /**
