@@ -73,7 +73,12 @@ export interface CustomLayerAdapter {
   /** Get all layer IDs managed by this adapter */
   getLayerIds(): string[];
 
-  /** Get the current state of a layer */
+  /**
+   * Get the current state of a layer. For a native map layer the adapter lists
+   * in `getLayerIds`, report the layer's own visibility and opacity, without
+   * folding in any group's: the control shows these values in the layer's row
+   * and style editor and never reads them back from the map.
+   */
   getLayerState(layerId: string): LayerState | null;
 
   /** Set layer visibility */

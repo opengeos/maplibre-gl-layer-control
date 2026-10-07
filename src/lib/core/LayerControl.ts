@@ -19,6 +19,7 @@ import { CustomLayerRegistry } from "./CustomLayerRegistry";
 import {
   getLayerType,
   getLayerOpacity,
+  getOpacityProperty,
   setLayerOpacity,
 } from "../utils/layerUtils";
 import {
@@ -451,10 +452,10 @@ export class LayerControl implements IControl {
         const layer = this.map.getLayer(layerId);
         if (!layer) return;
 
-        const visibility = this.map.getLayoutProperty(layerId, "visibility");
-        const isVisible = visibility !== "none";
-        const layerType = layer.type;
-        const opacity = getLayerOpacity(this.map, layerId, layerType);
+        const { visible: isVisible, opacity } = this.readLayerRowState(
+          layerId,
+          layer.type,
+        );
         const friendlyName = this.generateFriendlyName(layerId);
 
         this.state.layerStates[layerId] = this.mergeWithUserState(layerId, {
@@ -496,10 +497,10 @@ export class LayerControl implements IControl {
         const layer = this.map.getLayer(layerId);
         if (!layer) return;
 
-        const visibility = this.map.getLayoutProperty(layerId, "visibility");
-        const isVisible = visibility !== "none";
-        const layerType = layer.type;
-        const opacity = getLayerOpacity(this.map, layerId, layerType);
+        const { visible: isVisible, opacity } = this.readLayerRowState(
+          layerId,
+          layer.type,
+        );
         const friendlyName = this.generateFriendlyName(layerId);
 
         this.state.layerStates[layerId] = this.mergeWithUserState(layerId, {
@@ -1474,6 +1475,13 @@ export class LayerControl implements IControl {
       opacity.addEventListener("input", () => {
         this.setGroupOpacity(group.id, parseFloat(opacity.value));
       });
+      // Double-click to enter an exact opacity percentage (0-100)
+      opacity.addEventListener("dblclick", (event) => {
+        event.preventDefault();
+        this.showOpacityInput(opacity, (value) =>
+          this.setGroupOpacity(group.id, value),
+        );
+      });
       row.appendChild(opacity);
     }
 
@@ -1740,7 +1748,9 @@ export class LayerControl implements IControl {
       // Double-click to enter an exact opacity percentage (0-100)
       opacity.addEventListener("dblclick", (event) => {
         event.preventDefault();
-        this.showOpacityInput(layerId, opacity);
+        this.showOpacityInput(opacity, (value) =>
+          this.changeLayerOpacity(layerId, value),
+        );
       });
 
       row.appendChild(opacity);
@@ -2005,12 +2015,15 @@ export class LayerControl implements IControl {
 
   /**
    * Show a small popup that lets the user type an exact opacity percentage
-   * (0-100) for a layer. Triggered by double-clicking the opacity slider.
+   * (0-100). Triggered by double-clicking an opacity slider.
    *
-   * @param layerId The layer ID whose opacity is being edited
-   * @param slider The opacity range input associated with the layer row
+   * @param slider The opacity range input being edited
+   * @param applyOpacity Called with the chosen opacity (0-1) when the user confirms
    */
-  private showOpacityInput(layerId: string, slider: HTMLInputElement): void {
+  private showOpacityInput(
+    slider: HTMLInputElement,
+    applyOpacity: (opacity: number) => void,
+  ): void {
     // Close any existing opacity popup first
     this.hideOpacityInput();
 
@@ -2053,7 +2066,7 @@ export class LayerControl implements IControl {
         const opacity = pct / 100;
         slider.value = String(opacity);
         slider.title = `Opacity: ${pct}%`;
-        this.changeLayerOpacity(layerId, opacity);
+        applyOpacity(opacity);
       }
       this.hideOpacityInput();
     };
@@ -2149,6 +2162,46 @@ export class LayerControl implements IControl {
     setTimeout(() => {
       this.state.isStyleOperationInProgress = false;
     }, 200);
+  }
+
+  /**
+   * Get the opacity property an adapter owns for a native map layer: the layer
+   * type's primary opacity property, when an adapter reports state for the
+   * layer. Such a layer's paint value is its own opacity combined with the
+   * adapter's folder opacity, so it must be written and read through the
+   * adapter. Returns null for other layers, including custom layers and
+   * layers with native sub-layer groups.
+   * @param layerId The layer ID
+   */
+  private getAdapterOwnedOpacityProperty(layerId: string): string | null {
+    if (
+      this.state.layerStates[layerId]?.isCustomLayer ||
+      this.nativeLayerGroups.has(layerId) ||
+      !this.customLayerRegistry?.getLayerState(layerId)
+    ) {
+      return null;
+    }
+    const layer = this.map.getLayer(layerId);
+    if (!layer) return null;
+    const property = getOpacityProperty(layer.type);
+    return Array.isArray(property) ? property[0] : property;
+  }
+
+  /**
+   * Get the value a style editor control shows for a paint property: the
+   * adapter's own opacity for an adapter-owned opacity property, otherwise the
+   * map's paint value.
+   * @param layerId The layer ID
+   * @param property The paint property
+   */
+  private getStyleValue(
+    layerId: string,
+    property: keyof AllPaintProperties,
+  ): unknown {
+    if (this.getAdapterOwnedOpacityProperty(layerId) === property) {
+      return this.customLayerRegistry?.getLayerState(layerId)?.opacity;
+    }
+    return this.map.getPaintProperty(layerId, property);
   }
 
   /**
@@ -3491,7 +3544,7 @@ export class LayerControl implements IControl {
     this.addFillPatternGroup(container, layerId);
 
     // Fill Opacity
-    const fillOpacity = this.map.getPaintProperty(layerId, "fill-opacity");
+    const fillOpacity = this.getStyleValue(layerId, "fill-opacity");
     if (fillOpacity !== undefined && typeof fillOpacity === "number") {
       this.createSliderControl(
         container,
@@ -3809,7 +3862,7 @@ export class LayerControl implements IControl {
     );
 
     // Line Opacity
-    const lineOpacity = this.map.getPaintProperty(layerId, "line-opacity");
+    const lineOpacity = this.getStyleValue(layerId, "line-opacity");
     if (lineOpacity !== undefined && typeof lineOpacity === "number") {
       this.createSliderControl(
         container,
@@ -3892,7 +3945,7 @@ export class LayerControl implements IControl {
     );
 
     // Circle Opacity
-    const circleOpacity = this.map.getPaintProperty(layerId, "circle-opacity");
+    const circleOpacity = this.getStyleValue(layerId, "circle-opacity");
     if (circleOpacity !== undefined && typeof circleOpacity === "number") {
       this.createSliderControl(
         container,
@@ -3952,7 +4005,7 @@ export class LayerControl implements IControl {
       return;
     }
     // Raster Opacity
-    const rasterOpacity = this.map.getPaintProperty(layerId, "raster-opacity");
+    const rasterOpacity = this.getStyleValue(layerId, "raster-opacity");
     this.createSliderControl(
       container,
       layerId,
@@ -4074,7 +4127,7 @@ export class LayerControl implements IControl {
     }
 
     // Icon Opacity
-    const iconOpacity = this.map.getPaintProperty(layerId, "icon-opacity");
+    const iconOpacity = this.getStyleValue(layerId, "icon-opacity");
     if (iconOpacity !== undefined && typeof iconOpacity === "number") {
       this.createSliderControl(
         container,
@@ -4142,7 +4195,7 @@ export class LayerControl implements IControl {
       const property = slider.dataset.property as keyof AllPaintProperties | undefined;
       const sourceId = slider.dataset.layerId;
       if (!property || !sourceId) return;
-      const value = this.map.getPaintProperty(sourceId, property);
+      const value = this.getStyleValue(sourceId, property);
       if (typeof value === "number") {
         slider.value = String(value);
         const valueDisplay = slider.parentElement?.querySelector(
@@ -4293,9 +4346,17 @@ export class LayerControl implements IControl {
       // value in the display and paint rather than reading it back from the slider.
       slider.value = String(value);
       valueDisplay.textContent = formatNumericValue(value, step);
-      const targetIds = this.nativeLayerGroups.get(layerId) || [layerId];
-      for (const id of targetIds) {
-        this.map.setPaintProperty(id, property, value);
+      if (this.getAdapterOwnedOpacityProperty(layerId) === property) {
+        // The adapter folds in its folder opacity and records the layer's own
+        // value; writing the paint property here would bypass both.
+        this.changeLayerOpacity(layerId, value);
+        const layerState = this.state.layerStates[layerId];
+        this.updateUIForLayer(layerId, layerState?.visible ?? true, value);
+      } else {
+        const targetIds = this.nativeLayerGroups.get(layerId) || [layerId];
+        for (const id of targetIds) {
+          this.map.setPaintProperty(id, property, value);
+        }
       }
       this.notifyLayerStyleChange(property, value);
     };
@@ -4367,6 +4428,13 @@ export class LayerControl implements IControl {
     layerId: string,
     spec: Exclude<StylePropertySpec, { kind: "pattern" }>,
   ): { value: string | number } | { expressionOf: string } {
+    if (
+      spec.kind === "slider" &&
+      this.getAdapterOwnedOpacityProperty(layerId) === spec.property
+    ) {
+      // The adapter owns this layer's opacity; the map paint is folded.
+      return { value: this.getStyleValue(layerId, spec.property as keyof AllPaintProperties) as number };
+    }
     const raw = this.map.getPaintProperty(
       layerId,
       spec.property as keyof AllPaintProperties,
@@ -4582,6 +4650,14 @@ export class LayerControl implements IControl {
 
     // Restore original paint properties
     restoreOriginalStyle(this.map, layerId, this.state.originalStyles);
+    // The restored paint value is not the layer's own opacity when an adapter
+    // owns it; re-apply the adapter's value so the map stays consistent with it.
+    if (this.getAdapterOwnedOpacityProperty(layerId) !== null) {
+      this.customLayerRegistry?.setOpacity(
+        layerId,
+        this.customLayerRegistry.getLayerState(layerId)!.opacity,
+      );
+    }
 
     // Update UI controls to reflect the reset values
     const editor = this.styleEditors.get(layerId);
@@ -4596,7 +4672,7 @@ export class LayerControl implements IControl {
       sliders.forEach((slider) => {
         const property = slider.dataset.property as keyof AllPaintProperties | undefined;
         if (property) {
-          const value = this.map.getPaintProperty(layerId, property);
+          const value = this.getStyleValue(layerId, property);
           if (value !== undefined && typeof value === "number") {
             slider.value = String(value);
             // Update value display
@@ -4650,6 +4726,27 @@ export class LayerControl implements IControl {
   }
 
   /**
+   * Read the visibility and opacity a layer's panel row should show. A native
+   * layer an adapter manages reports its own values; the map's paint and layout
+   * hold those combined with the adapter's folder settings, so reading them
+   * back would corrupt the row.
+   * @param layerId The layer ID
+   * @param layerType The layer's map type
+   */
+  private readLayerRowState(
+    layerId: string,
+    layerType: string,
+  ): { visible: boolean; opacity: number } {
+    const adapterState = this.customLayerRegistry?.getLayerState(layerId);
+    const visibility = this.map.getLayoutProperty(layerId, "visibility");
+    return {
+      visible: adapterState?.visible ?? visibility !== "none",
+      opacity:
+        adapterState?.opacity ?? getLayerOpacity(this.map, layerId, layerType),
+    };
+  }
+
+  /**
    * Update layer states from map (sync UI with map)
    */
   private updateLayerStatesFromMap(): void {
@@ -4672,13 +4769,10 @@ export class LayerControl implements IControl {
         const layer = this.map.getLayer(layerId);
         if (!layer) return;
 
-        // Check visibility
-        const visibility = this.map.getLayoutProperty(layerId, "visibility");
-        const isVisible = visibility !== "none";
-
-        // Get opacity
-        const layerType = layer.type;
-        const opacity = getLayerOpacity(this.map, layerId, layerType);
+        const { visible: isVisible, opacity } = this.readLayerRowState(
+          layerId,
+          layer.type,
+        );
 
         // Update local state
         if (this.state.layerStates[layerId]) {
@@ -4876,11 +4970,10 @@ export class LayerControl implements IControl {
           const layer = this.map.getLayer(layerId);
           if (!layer) return;
 
-          // Get layer type and opacity
-          const layerType = layer.type;
-          const opacity = getLayerOpacity(this.map, layerId, layerType);
-          const visibility = this.map.getLayoutProperty(layerId, "visibility");
-          const isVisible = visibility !== "none";
+          const { visible: isVisible, opacity } = this.readLayerRowState(
+            layerId,
+            layer.type,
+          );
 
           // Add to state
           this.state.layerStates[layerId] = {

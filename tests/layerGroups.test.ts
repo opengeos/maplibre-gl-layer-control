@@ -165,6 +165,36 @@ describe("layer groups", () => {
     expect(element.classList.contains("collapsed")).toBe(false);
   });
 
+  it("double-clicking a group's opacity slider opens the exact-value input", () => {
+    const { control, adapter } = makeControl(
+      [{ id: "a", groupId: "g" }],
+      [group("g", { opacity: 0.8 })],
+    );
+    const mapContainer = document.createElement("div");
+    document.body.appendChild(mapContainer);
+    // mapContainer is private and unset here because no map is attached
+    const internals = control as unknown as { mapContainer: HTMLElement };
+    internals.mapContainer = mapContainer;
+
+    const slider = panelOf(control).querySelector(
+      ".layer-control-group-opacity",
+    ) as HTMLInputElement;
+    slider.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+
+    const input = mapContainer.querySelector(
+      ".layer-control-opacity-input input",
+    ) as HTMLInputElement;
+    expect(input.value).toBe("80");
+
+    input.value = "40";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+
+    expect(adapter.setGroupOpacity).toHaveBeenCalledWith("g", 0.4);
+    expect(slider.value).toBe("0.4");
+    expect(mapContainer.querySelector(".layer-control-opacity-input")).toBeNull();
+    mapContainer.remove();
+  });
+
   it("refreshGroups updates rows in place and rebuilds on structural change", () => {
     const layers: FakeLayer[] = [{ id: "a", groupId: "g" }, { id: "b" }];
     const groups = [group("g")];

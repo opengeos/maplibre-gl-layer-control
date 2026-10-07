@@ -291,13 +291,6 @@ map.on('load', () => {
     basemapStyleUrl: BASEMAP_STYLE_URL, // Enables reliable basemap vs user layer detection
     customLayerAdapters: [adapter],
     layerStates: Object.fromEntries(adapter.getLayerIds().map(id => [id, { name: adapter.getName(id) }])),
-    onLayerStyleChange: (id, property, value) => {
-      // Style-editor edits to a layer's primary opacity must keep folder opacity applied.
-      const primary = ({ fill: 'fill-opacity', line: 'line-opacity', circle: 'circle-opacity', raster: 'raster-opacity' } as Record<string, string>)[map.getLayer(id)?.type ?? ''];
-      if (property === primary && typeof value === 'number' && adapter.getLayerState(id)) {
-        adapter.setOpacity(id, value);
-      }
-    },
   });
 
   // Add the control to the map
