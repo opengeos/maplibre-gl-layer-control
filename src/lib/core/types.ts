@@ -37,6 +37,31 @@ export interface PartialLayerStates {
 }
 
 /**
+ * A collapsible folder of layers in the panel. Supplied by a
+ * {@link CustomLayerAdapter} through `getGroups`; layers join a group through
+ * the adapter's `getLayerGroupId`.
+ *
+ * A group's `visible` and `opacity` are its own settings, separate from those
+ * of its layers. The control shows and edits them but never folds them into
+ * the layer rows: applying a hidden or translucent group to its layers on the
+ * map is the adapter's job.
+ */
+export interface LayerGroupState {
+  /** Unique group ID */
+  id: string;
+  /** Display name for the group */
+  name: string;
+  /** ID of the enclosing group, or undefined for a top-level group */
+  parentId?: string;
+  /** Whether the group is visible */
+  visible: boolean;
+  /** Group opacity (0-1) */
+  opacity: number;
+  /** Whether the group's rows are folded away in the panel */
+  collapsed: boolean;
+}
+
+/**
  * Adapter interface for custom (non-MapLibre) layers.
  * Implement this interface to integrate custom layer types (e.g., deck.gl layers)
  * with the layer control.
@@ -87,6 +112,35 @@ export interface CustomLayerAdapter {
    * for these native layers instead of the generic "custom layer" message.
    */
   getNativeLayerIds?(layerId: string): string[];
+
+  /**
+   * Get the layer groups this adapter defines (optional). When any adapter
+   * returns groups, the panel nests each layer under its group (see
+   * {@link getLayerGroupId}) as collapsible folders, and drag-and-drop and the
+   * context-menu moves keep a layer among the other layers of its own group.
+   * Groups that contain no layer, directly or through a nested group, are not
+   * shown.
+   */
+  getGroups?(): LayerGroupState[];
+
+  /**
+   * Get the ID of the group a layer belongs to, or undefined when the layer
+   * sits at the top level (optional; required for groups to have members).
+   */
+  getLayerGroupId?(layerId: string): string | undefined;
+
+  /** Set group visibility (optional; called from the group's checkbox). */
+  setGroupVisibility?(groupId: string, visible: boolean): void;
+
+  /** Set group opacity (0-1) (optional; called from the group's slider). */
+  setGroupOpacity?(groupId: string, opacity: number): void;
+
+  /**
+   * Record that a group was collapsed or expanded in the panel (optional).
+   * Without it the control still folds the group, but only until the panel is
+   * rebuilt from the adapter's `getGroups`.
+   */
+  setGroupCollapsed?(groupId: string, collapsed: boolean): void;
 }
 
 /**
@@ -111,7 +165,7 @@ export interface LayerControlOptions {
   panelWidth?: number;
   /** Minimum panel width in pixels (default: 240) */
   panelMinWidth?: number;
-  /** Maximum panel width in pixels (default: 420) */
+  /** Maximum panel width in pixels (default: 960) */
   panelMaxWidth?: number;
   /** Whether to show the style editor button (gear icon) for layers (default: true) */
   showStyleEditor?: boolean;
@@ -119,7 +173,12 @@ export interface LayerControlOptions {
   showOpacitySlider?: boolean;
   /** Whether to show layer type symbols/icons next to layer names (default: true) */
   showLayerSymbol?: boolean;
-  /** Maximum panel height in pixels (default: 600). When content exceeds this height, the panel becomes scrollable. */
+  /**
+   * Maximum panel height in pixels. When omitted, the panel grows to fill the
+   * available vertical space in the map container and only becomes scrollable
+   * once the layer list is taller than that space. Set an explicit value to
+   * cap the height instead.
+   */
   panelMaxHeight?: number;
   /** Whether to exclude drawn layers from drawing libraries like Geoman, Mapbox GL Draw, etc. (default: true) */
   excludeDrawnLayers?: boolean;
@@ -144,7 +203,63 @@ export interface LayerControlOptions {
   onLayerReorder?: (layerOrder: string[]) => void;
   /** Callback when a layer is removed via context menu */
   onLayerRemove?: (layerId: string) => void;
+  /**
+   * Callback fired whenever a paint property is changed through the per-layer
+   * style editor (a slider/color input, or the Reset button). Reports the
+   * layer the open style editor belongs to (`layerId`), the MapLibre paint
+   * property name (e.g. `"raster-brightness-max"`, `"fill-color"`), and the new
+   * value (a number for sliders, a hex string for color pickers). Lets
+   * consumers mirror the change into their own store so external style UI
+   * (e.g. a separate sidebar) stays in sync. The control still applies the
+   * change to the map itself; this callback is purely a notification.
+   */
+  onLayerStyleChange?: (
+    layerId: string,
+    property: string,
+    value: unknown,
+  ) => void;
+  /**
+   * Callback fired when the Background (basemap) group visibility is toggled
+   * via the control's checkbox. Lets consumers mirror the new state into their
+   * own store so external basemap UI (e.g. a separate layer panel) stays in sync.
+   */
+  onBackgroundVisibilityChange?: (visible: boolean) => void;
+  /**
+   * Callback fired when the Background (basemap) group opacity is changed via
+   * the control's slider. Lets consumers mirror the new opacity into their own
+   * store so external basemap UI stays in sync.
+   */
+  onBackgroundOpacityChange?: (opacity: number) => void;
+  /**
+   * Whether to show the "Saved configurations" controls in the Background Layers
+   * panel, letting users save the current basemap element visibility as a named
+   * preset and re-apply it later with one click (default: true).
+   */
+  enableBackgroundPresets?: boolean;
+  /**
+   * localStorage key under which background-layer visibility presets are stored.
+   * Presets persist across sessions and projects (default:
+   * 'maplibre-layer-control:background-presets').
+   */
+  backgroundPresetStorageKey?: string;
+  /**
+   * Callback fired whenever the set of saved background presets changes
+   * (created or deleted). Receives the full preset map. Applying a preset does
+   * not change the stored set, so it does not trigger this callback.
+   */
+  onBackgroundPresetsChange?: (presets: BackgroundPresets) => void;
 }
+
+/**
+ * A single background-layer visibility preset: a map of style-layer ID to
+ * whether that layer should be visible.
+ */
+export type BackgroundLayerVisibility = Record<string, boolean>;
+
+/**
+ * Collection of named background-layer visibility presets, keyed by preset name.
+ */
+export type BackgroundPresets = Record<string, BackgroundLayerVisibility>;
 
 /**
  * MapLibre layer types that support styling

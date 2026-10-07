@@ -23,10 +23,13 @@ Then open http://localhost:5173 in your browser.
 ## Key Imports
 
 ```javascript
-import maplibregl from 'maplibre-gl';
+import * as maplibregl from 'maplibre-gl';
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { LayerControl } from 'maplibre-gl-layer-control';
 
 // Don't forget the styles!
 import 'maplibre-gl/dist/maplibre-gl.css';
 import 'maplibre-gl-layer-control/style.css';
+
+maplibregl.setWorkerUrl(workerUrl);
 ```

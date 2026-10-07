@@ -1,5 +1,25 @@
 /* Layer Control Styles */
 
+/* Toggle button icon. Only the icon is sized here; its color is intentionally
+   left to the host/theme via `currentColor` (the SVG uses stroke="currentColor")
+   so dark-mode themes can recolor it. Without an explicit size the inline SVG
+   renders at the full button size, so cap it. */
+.maplibregl-ctrl-layer-control .layer-control-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  line-height: 0;
+}
+
+.maplibregl-ctrl-layer-control .layer-control-icon svg {
+  width: 22px;
+  height: 22px;
+  stroke: currentColor;
+  fill: none;
+}
+
 /* Panel - positioned dynamically by JavaScript for floating behavior */
 .layer-control-panel {
   position: absolute;
@@ -7,8 +27,9 @@
   background: #fff;
   border-radius: 4px;
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
-  min-width: 240px;
-  max-width: 420px;
+  /* Width is set explicitly in JS and clamped to the configured
+     panelMinWidth/panelMaxWidth; no fixed CSS min/max so custom bounds
+     (and edge-drag resizing) are honored. */
   max-height: 600px;
   overflow-y: auto;
   z-index: 1000;
@@ -40,61 +61,56 @@
   font-size: 13px;
 }
 
-/* Width control */
-.layer-control-width-control {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 500;
-  font-size: 11px;
-  color: #5c6a7d;
-  flex-shrink: 0;
-  margin-left: auto;
-}
-
-.layer-control-width-slider {
-  position: relative;
-  width: 130px;
-  height: 16px;
-  border-radius: 8px;
+/* Edge resize handle — drag the panel edge to resize its width */
+.layer-control-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
   cursor: ew-resize;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   touch-action: none;
+  z-index: 1001;
+}
+
+.layer-control-resize-handle-left {
+  left: 0;
+}
+
+.layer-control-resize-handle-right {
+  right: 0;
+}
+
+/* Subtle visual affordance on hover / while dragging */
+.layer-control-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
   background: transparent;
-  padding: 0 8px;
-  box-sizing: border-box;
+  transition: background 0.15s ease;
 }
 
-.layer-control-width-value {
-  min-width: 44px;
-  text-align: right;
-  font-feature-settings: 'tnum';
-  color: #3a4756;
+.layer-control-resize-handle-left::before {
+  left: 1px;
 }
 
-.layer-control-width-track {
-  position: absolute;
-  left: 8px;
-  right: 8px;
-  height: 4px;
-  border-radius: 2px;
-  background: linear-gradient(90deg, #d0d7e2, #2f6fed);
-  pointer-events: none;
+.layer-control-resize-handle-right::before {
+  right: 1px;
 }
 
-.layer-control-width-thumb {
-  position: absolute;
-  top: 50%;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #fff;
-  border: 2px solid #2f6fed;
-  transform: translateY(-50%);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-  pointer-events: none;
+.layer-control-resize-handle:hover::before,
+.layer-control-panel.resizing-active .layer-control-resize-handle::before {
+  background: #2f6fed;
+}
+
+.layer-control-panel.resizing-active {
+  user-select: none;
+}
+
+.layer-control-panel.resizing-active * {
+  cursor: ew-resize !important;
+  user-select: none !important;
 }
 
 /* Action buttons (Show All / Hide All) */
@@ -220,15 +236,64 @@
   cursor: pointer;
 }
 
+/* Exact-opacity input popup (double-click the opacity slider) */
+.layer-control-opacity-input {
+  position: absolute;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: #fff;
+  border: 1px solid #d0d7e2;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+  color: #333;
+}
+
+.layer-control-opacity-input-label {
+  font-weight: 600;
+  color: #5c6a7d;
+}
+
+.layer-control-opacity-input-field {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.layer-control-opacity-input-field input {
+  width: 56px;
+  padding: 3px 6px;
+  border: 1px solid #c4ccd8;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #333;
+  text-align: right;
+  -moz-appearance: textfield;
+}
+
+.layer-control-opacity-input-field input:focus {
+  outline: none;
+  border-color: #2f6fed;
+  box-shadow: 0 0 0 2px rgba(47, 111, 237, 0.2);
+}
+
+.layer-control-opacity-input-suffix {
+  color: #5c6a7d;
+  font-weight: 500;
+}
+
 /* Style button */
 .layer-control-style-button {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   border-radius: 4px;
   border: none;
   background: none;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 12px;
   color: #444;
   display: flex;
   align-items: center;
@@ -454,7 +519,7 @@
 .style-control-value {
   min-width: 48px;
   text-align: right;
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: "SF Mono", "Monaco", "Consolas", monospace;
   font-size: 11px;
   color: #3a4756;
   font-weight: 500;
@@ -482,7 +547,7 @@
   padding: 4px 8px;
   border: 1px solid #d0d7e2;
   border-radius: 4px;
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: "SF Mono", "Monaco", "Consolas", monospace;
   font-size: 11px;
   color: #3a4756;
   background: #fff;
@@ -512,14 +577,14 @@
 /* Style button */
 .layer-control-style-button {
   flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   border: 1px solid #ddd;
   border-radius: 3px;
   background: white;
   color: #666;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 12px;
   padding: 0;
   line-height: 1;
   transition: all 0.2s ease;
@@ -600,6 +665,7 @@
 
 .style-editor-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
   padding-top: 8px;
@@ -607,8 +673,8 @@
 }
 
 .style-editor-button {
-  padding: 8px 16px;
-  min-width: 70px;
+  padding: 8px 12px;
+  min-width: 60px;
   border: 1px solid #ddd;
   border-radius: 3px;
   background: white;
@@ -629,43 +695,15 @@
   background: #e0e0e0;
 }
 
-.layer-control-style-editor .style-editor-button-reset {
-  background: #fb923c !important;
-  color: #ffffff !important;
-  border-color: #f97316 !important;
-  font-weight: 600;
-}
-
-.layer-control-style-editor .style-editor-button-reset:hover {
-  background: #f97316 !important;
-  border-color: #ea580c !important;
-  color: #ffffff !important;
-}
-
-.layer-control-style-editor .style-editor-button-close {
-  background: #6b7280 !important;
-  color: #ffffff !important;
-  border-color: #4b5563 !important;
-  font-weight: 600;
-}
-
-.layer-control-style-editor .style-editor-button-close:hover {
-  background: #4b5563 !important;
-  border-color: #374151 !important;
-  color: #ffffff !important;
-}
-
-.layer-control-style-editor .style-editor-button-remove {
-  background: #ef4444 !important;
-  color: #ffffff !important;
-  border-color: #dc2626 !important;
-  font-weight: 600;
-}
-
+/* The Reset / Remove / Close action buttons share the neutral base style above.
+   They intentionally drop the former orange/gray/red fills: consuming apps
+   reserve those signal colors for warnings and errors, so a standard action
+   button should not emit them. The destructive Remove action is confirmed via
+   an inline prompt and only hints its nature with a restrained red on hover. */
 .layer-control-style-editor .style-editor-button-remove:hover {
-  background: #dc2626 !important;
-  border-color: #b91c1c !important;
-  color: #ffffff !important;
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #b91c1c;
 }
 
 /* ===== Background Legend Panel ===== */
@@ -746,6 +784,14 @@
   border-color: #1a4fc2;
 }
 
+.layer-control-background-legend .background-legend-action-btn:disabled {
+  background: #b9c4d6 !important;
+  background-color: #b9c4d6 !important;
+  border-color: #b9c4d6;
+  color: #ffffff;
+  cursor: not-allowed;
+}
+
 /* Filter row */
 .background-legend-filter {
   display: flex;
@@ -810,6 +856,53 @@
   width: 14px;
   height: 14px;
   display: block;
+}
+
+/* Saved configurations (presets) */
+.background-legend-presets {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.background-legend-presets-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #444;
+  margin-bottom: 6px;
+}
+
+.background-legend-presets-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.background-legend-presets-row:last-child {
+  margin-bottom: 0;
+}
+
+.background-legend-presets-select,
+.background-legend-presets-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 3px;
+  background: #ffffff;
+  color: #333;
+  font-size: 11px;
+  height: auto;
+}
+
+.background-legend-presets-select:focus,
+.background-legend-presets-input:focus {
+  outline: none;
+  border-color: #2f6fed;
+}
+
+.background-legend-presets-row .background-legend-action-btn {
+  flex: 0 0 auto;
 }
 
 .background-legend-layer-name {
@@ -885,7 +978,9 @@
   z-index: 1001;
   background: #fff;
   border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.15),
+    0 0 0 1px rgba(0, 0, 0, 0.05);
   min-width: 180px;
   padding: 4px 0;
   font-size: 12px;
@@ -967,6 +1062,59 @@
 
 .layer-control-name-input:focus {
   box-shadow: 0 0 0 2px rgba(47, 111, 237, 0.2);
+}
+
+/* ===== Layer Groups ===== */
+.layer-control-group {
+  box-sizing: border-box;
+}
+
+.layer-control-group-row {
+  padding: 4px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.layer-control-group-name {
+  font-weight: 600;
+}
+
+.layer-control-group-toggle {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #666;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.layer-control-group-toggle svg {
+  width: 12px;
+  height: 12px;
+  transform: rotate(90deg);
+  transition: transform 0.15s ease;
+}
+
+.layer-control-group.collapsed > .layer-control-group-row .layer-control-group-toggle svg {
+  transform: rotate(0deg);
+}
+
+.layer-control-group-children {
+  padding-left: 14px;
+  box-sizing: border-box;
+}
+
+.layer-control-group.collapsed > .layer-control-group-children {
+  display: none;
+}
+
+/* A hidden group hides its layers on the map, so dim their rows */
+.layer-control-group-hidden > .layer-control-group-children {
+  opacity: 0.55;
 }
 
 /* ===== Drag and Drop Styles ===== */

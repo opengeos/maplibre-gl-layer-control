@@ -1,4 +1,4 @@
-import type { Map as MapLibreMap } from 'maplibre-gl';
+import type { Map as MapLibreMap, AllPaintProperties } from 'maplibre-gl';
 import type { StyleableLayerType } from '../core/types';
 
 /**
@@ -60,11 +60,11 @@ export function getLayerOpacity(
 
   if (Array.isArray(opacityProp)) {
     // For symbol layers, use icon-opacity as the primary value
-    const opacity = map.getPaintProperty(layerId, opacityProp[0]);
+    const opacity = map.getPaintProperty(layerId, opacityProp[0] as keyof AllPaintProperties);
     return (opacity !== undefined && opacity !== null) ? opacity as number : 1.0;
   }
 
-  const opacity = map.getPaintProperty(layerId, opacityProp);
+  const opacity = map.getPaintProperty(layerId, opacityProp as keyof AllPaintProperties);
   return (opacity !== undefined && opacity !== null) ? opacity as number : 1.0;
 }
 
@@ -91,10 +91,10 @@ export function setLayerOpacity(
   if (Array.isArray(opacityProp)) {
     // For symbol layers, set both icon and text opacity
     opacityProp.forEach((prop) => {
-      map.setPaintProperty(layerId, prop, opacity);
+      map.setPaintProperty(layerId, prop as keyof AllPaintProperties, opacity);
     });
   } else {
-    map.setPaintProperty(layerId, opacityProp, opacity);
+    map.setPaintProperty(layerId, opacityProp as keyof AllPaintProperties, opacity);
   }
 }
 

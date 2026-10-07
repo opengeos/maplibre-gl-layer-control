@@ -1,4 +1,4 @@
-import type { Map as MapLibreMap } from 'maplibre-gl';
+import type { Map as MapLibreMap, AllPaintProperties } from 'maplibre-gl';
 import type { OriginalStyle } from '../core/types';
 
 /**
@@ -98,7 +98,7 @@ export function getCurrentPaintValue(
   fallback?: any
 ): any {
   try {
-    const value = map.getPaintProperty(layerId, property);
+    const value = map.getPaintProperty(layerId, property as keyof AllPaintProperties);
     return value !== undefined ? value : fallback;
   } catch (error) {
     return fallback;
@@ -127,7 +127,7 @@ export function restoreOriginalStyle(
   Object.entries(original.paint).forEach(([property, value]) => {
     try {
       const restoredValue = clonePaintValue(value);
-      map.setPaintProperty(layerId, property, restoredValue);
+      map.setPaintProperty(layerId, property as keyof AllPaintProperties, restoredValue);
       applied[property] = restoredValue;
     } catch (error) {
       console.warn(`Failed to restore ${property} for ${layerId}:`, error);

@@ -1,3 +1,8 @@
+import { colord, extend } from 'colord';
+import namesPlugin from 'colord/plugins/names';
+
+extend([namesPlugin]);
+
 /**
  * Convert RGB values to hex color string
  * @param r Red component (0-255)
@@ -15,38 +20,33 @@ export function rgbToHex(r: number, g: number, b: number): string {
 }
 
 /**
- * Normalize a color value to hex format
- * Handles hex strings, RGB strings, and RGB arrays
- * @param value Color value in various formats
- * @returns Normalized hex color string (always 6 digits)
+ * Normalize a color value to six-digit RGB hex.
+ * String values are parsed as CSS colors; numeric arrays use RGB byte channels.
+ * Alpha channels are ignored.
+ * @param value Color value in CSS string or RGB(A) array format
+ * @returns Normalized hex color string, or null when the value is invalid
  */
-export function normalizeColor(value: any): string {
+export function normalizeColor(value: unknown): string | null {
   if (typeof value === 'string') {
-    // Already hex format
-    if (value.startsWith('#')) {
-      // Expand shorthand hex (#RGB to #RRGGBB)
-      if (value.length === 4) {
-        const r = value[1];
-        const g = value[2];
-        const b = value[3];
-        return `#${r}${r}${g}${g}${b}${b}`;
-      }
-      return value;
-    }
-
-    // RGB string format: 'rgb(51, 136, 255)'
-    if (value.startsWith('rgb')) {
-      const match = value.match(/\d+/g);
-      if (match && match.length >= 3) {
-        const [r, g, b] = match.map((num) => parseInt(num, 10));
-        return rgbToHex(r, g, b);
-      }
-    }
-  } else if (Array.isArray(value) && value.length >= 3) {
-    // RGB array format: [51, 136, 255]
-    return rgbToHex(value[0], value[1], value[2]);
+    const color = colord(value);
+    if (!color.isValid()) return null;
+    const { r, g, b } = color.toRgb();
+    return rgbToHex(r, g, b);
   }
 
-  // Fallback color (MapLibre default blue)
-  return '#3388ff';
+  if (Array.isArray(value) && value.length >= 3) {
+    const [r, g, b] = value;
+    if (
+      typeof r === 'number' &&
+      Number.isFinite(r) &&
+      typeof g === 'number' &&
+      Number.isFinite(g) &&
+      typeof b === 'number' &&
+      Number.isFinite(b)
+    ) {
+      return rgbToHex(r, g, b);
+    }
+  }
+
+  return null;
 }

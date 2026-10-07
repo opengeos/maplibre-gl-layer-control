@@ -1,7 +1,10 @@
-import maplibregl from 'maplibre-gl';
+import * as maplibregl from 'maplibre-gl';
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { LayerControl } from '../../src/index';
 import '../../src/index.css';
 import 'maplibre-gl/dist/maplibre-gl.css';
+
+maplibregl.setWorkerUrl(workerUrl);
 
 /**
  * Dynamic Layers Example
@@ -85,7 +88,7 @@ map.on('load', () => {
     collapsed: false,
     panelWidth: 350,
     panelMinWidth: 240,
-    panelMaxWidth: 450,
+    panelMaxWidth: 960,
     showStyleEditor: true,
     showOpacitySlider: true,
     showLayerSymbol: true,

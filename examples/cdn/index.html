@@ -6,8 +6,7 @@
   <title>MapLibre Layer Control - CDN Example</title>
 
   <!-- MapLibre GL CSS and JS -->
-  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
-  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.13.0/dist/maplibre-gl.css">
 
   <!-- Layer Control CSS -->
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl-layer-control/dist/maplibre-gl-layer-control.css">
@@ -89,6 +88,7 @@
   <div id="map"></div>
 
   <script type="module">
+    import * as maplibregl from 'https://unpkg.com/maplibre-gl@6.13.0/dist/maplibre-gl.mjs';
     // Import the layer control from CDN
     import { LayerControl } from 'https://unpkg.com/maplibre-gl-layer-control/dist/index.mjs';
 
@@ -221,7 +221,7 @@
         layers: ['countries-fill', 'countries-outline', 'country-points', 'raster-layer'],
         panelWidth: 320,
         panelMinWidth: 240,
-        panelMaxWidth: 450
+        panelMaxWidth: 960
       });
 
       map.addControl(layerControl, 'top-right');

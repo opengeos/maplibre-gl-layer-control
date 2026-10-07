@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import type { Map as MapLibreMap } from 'maplibre-gl';
+import type { Map as MapLibreMap, AllPaintProperties } from 'maplibre-gl';
 import type { OriginalStyle } from '../core/types';
 import { cacheOriginalLayerStyle, restoreOriginalStyle } from '../utils/styleCache';
 
@@ -84,7 +84,7 @@ export function useStyleEditor({ map }: UseStyleEditorOptions): UseStyleEditorRe
   const applyStyle = useCallback(
     (layerId: string, property: string, value: any) => {
       try {
-        map.setPaintProperty(layerId, property, value);
+        map.setPaintProperty(layerId, property as keyof AllPaintProperties, value);
       } catch (error) {
         console.warn(`Failed to apply style ${property} to ${layerId}:`, error);
       }

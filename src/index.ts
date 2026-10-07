@@ -14,6 +14,9 @@ export type {
   PaintProperty,
   StyleControlConfig,
   CustomLayerAdapter,
+  LayerGroupState,
+  BackgroundLayerVisibility,
+  BackgroundPresets,
 } from './lib/core/types';
 
 // Re-export utilities for advanced use cases
@@ -23,8 +26,10 @@ export { formatNumericValue, clamp } from './lib/utils/formatters';
 export {
   getLayerColor,
   getLayerColorFromSpec,
+  getLayerSymbolStyle,
+  getLayerSymbolStyleFromSpec,
   createLayerSymbolSVG,
   createBackgroundGroupSymbolSVG,
   darkenColor,
 } from './lib/utils/symbolUtils';
-export type { SymbolOptions } from './lib/utils/symbolUtils';
+export type { SymbolOptions, LayerSymbolStyle, FillPatternImage } from './lib/utils/symbolUtils';

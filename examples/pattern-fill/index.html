@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pattern-fill previews</title>
+  <style>
+    body { margin: 0; font: 14px system-ui, sans-serif; }
+    #map { height: 100vh; }
+    aside { position: absolute; top: 12px; left: 12px; max-width: 260px; padding: 14px; background: white; border-radius: 6px; }
+    h1 { margin: 0 0 8px; font-size: 18px; }
+    p { line-height: 1.4; }
+    button { cursor: pointer; padding: 6px 10px; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <aside>
+    <h1>Pattern-fill previews</h1>
+    <p>Raster stripes retain their colours. Both SDF swatches use the same dot image, tinted with each layer's fill colour.</p>
+    <button id="tint" disabled>Change SDF tint</button>
+    <p>MapLibre GL JS 6.13 colours the SDF patterns on the map too. The tint button changes the pink layer and its preview together.</p>
+  </aside>
+  <script type="module">
+    import * as maplibregl from 'maplibre-gl';
+    import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
+    import { LayerControl } from '../../src/index.ts';
+    import '../../src/index.css';
+    import 'maplibre-gl/dist/maplibre-gl.css';
+
+    maplibregl.setWorkerUrl(workerUrl);
+
+    const map = new maplibregl.Map({
+      container: 'map', center: [0, 0], zoom: 2,
+      style: { version: 8, sources: {}, layers: [
+        { id: 'background', type: 'background', paint: { 'background-color': '#eef2f6' } }
+      ] }
+    });
+
+    map.on('load', () => {
+      const size = 32;
+      const dots = new Uint8Array(size * size * 4);
+      const stripes = new Uint8Array(size * size * 4);
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const i = (y * size + x) * 4;
+          const distance = 8 - Math.hypot(x + 0.5 - size / 2, y + 0.5 - size / 2);
+          // SDF contour at 0.75, with distance encoded in the alpha channel.
+          dots[i + 3] = Math.round(255 * Math.max(0, Math.min(1, 0.75 + distance / 8)));
+          stripes.set([30, 160, 100, x % 16 < 8 ? 255 : 0], i);
+        }
+      }
+      map.addImage('dots', { width: size, height: size, data: dots }, { sdf: true, pixelRatio: 2 });
+      map.addImage('stripes', { width: size, height: size, data: stripes }, { pixelRatio: 2 });
+
+      const layers = [
+        ['raster-stripes', 'stripes', '#1ea064'],
+        ['sdf-pink', 'dots', '#db2777'],
+        ['sdf-blue', 'dots', '#2563eb']
+      ];
+      layers.forEach(([id, pattern, color], index) => {
+        const west = -54 + index * 36;
+        map.addSource(id, { type: 'geojson', data: {
+          type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [
+            [[west, -14], [west + 28, -14], [west + 28, 14], [west, 14], [west, -14]]
+          ] }
+        } });
+        map.addLayer({ id, type: 'fill', source: id,
+          paint: { 'fill-pattern': pattern, 'fill-color': color } });
+      });
+      map.addControl(new LayerControl({
+        collapsed: false, layers: layers.map(([id]) => id), showStyleEditor: false
+      }), 'top-right');
+
+      const button = document.getElementById('tint');
+      button.disabled = false;
+      let teal = false;
+      button.addEventListener('click', (event) => {
+        event.stopPropagation(); // Keep the preview panel open while tinting.
+        teal = !teal;
+        map.setPaintProperty('sdf-pink', 'fill-color', teal ? '#0d9488' : '#db2777');
+      });
+    });
+  </script>
+</body>
+</html>

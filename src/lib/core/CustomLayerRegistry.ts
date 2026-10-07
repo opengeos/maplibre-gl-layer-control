@@ -1,4 +1,4 @@
-import type { CustomLayerAdapter, LayerState } from './types';
+import type { CustomLayerAdapter, LayerGroupState, LayerState } from './types';
 
 /**
  * Registry for managing custom layer adapters.
@@ -49,6 +49,14 @@ export class CustomLayerRegistry {
       ids.push(...adapter.getLayerIds());
     });
     return ids;
+  }
+
+  /**
+   * Get each adapter's layer IDs as a separate list, in adapter order.
+   * @returns One array of layer IDs per registered adapter
+   */
+  getLayerIdGroups(): string[][] {
+    return Array.from(this.adapters.values(), (adapter) => adapter.getLayerIds());
   }
 
   /**
@@ -167,6 +175,93 @@ export class CustomLayerRegistry {
     const adapter = this.getAdapterForLayer(layerId);
     if (adapter && adapter.removeLayer) {
       adapter.removeLayer(layerId);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Get the layer groups of every adapter. When two adapters define the same
+   * group ID, the first registered adapter's group wins.
+   * @returns The groups, in adapter order
+   */
+  getGroups(): LayerGroupState[] {
+    const groups: LayerGroupState[] = [];
+    const seen = new Set<string>();
+    this.adapters.forEach(adapter => {
+      for (const group of adapter.getGroups?.() ?? []) {
+        if (seen.has(group.id)) continue;
+        seen.add(group.id);
+        groups.push(group);
+      }
+    });
+    return groups;
+  }
+
+  /**
+   * Get the ID of the group a custom layer belongs to.
+   * @param layerId The layer ID
+   * @returns The group ID, or undefined when the layer is ungrouped
+   */
+  getLayerGroupId(layerId: string): string | undefined {
+    const adapter = this.getAdapterForLayer(layerId);
+    return adapter?.getLayerGroupId?.(layerId);
+  }
+
+  /**
+   * Get the adapter that defines a group.
+   * @param groupId The group ID
+   * @returns The adapter or null if no adapter defines the group
+   */
+  private getAdapterForGroup(groupId: string): CustomLayerAdapter | null {
+    for (const adapter of this.adapters.values()) {
+      if (adapter.getGroups?.().some(group => group.id === groupId)) {
+        return adapter;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Set visibility of a group.
+   * @param groupId The group ID
+   * @param visible Whether the group should be visible
+   * @returns true if the operation was handled by an adapter
+   */
+  setGroupVisibility(groupId: string, visible: boolean): boolean {
+    const adapter = this.getAdapterForGroup(groupId);
+    if (adapter?.setGroupVisibility) {
+      adapter.setGroupVisibility(groupId, visible);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Set opacity of a group.
+   * @param groupId The group ID
+   * @param opacity The opacity value (0-1)
+   * @returns true if the operation was handled by an adapter
+   */
+  setGroupOpacity(groupId: string, opacity: number): boolean {
+    const adapter = this.getAdapterForGroup(groupId);
+    if (adapter?.setGroupOpacity) {
+      adapter.setGroupOpacity(groupId, opacity);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Record that a group was collapsed or expanded.
+   * @param groupId The group ID
+   * @param collapsed Whether the group is now collapsed
+   * @returns true if the operation was handled by an adapter
+   */
+  setGroupCollapsed(groupId: string, collapsed: boolean): boolean {
+    const adapter = this.getAdapterForGroup(groupId);
+    if (adapter?.setGroupCollapsed) {
+      adapter.setGroupCollapsed(groupId, collapsed);
       return true;
     }
     return false;

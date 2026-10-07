@@ -2,6 +2,9 @@
 
 This folder contains examples for using `maplibre-gl-layer-control`.
 
+Development examples use MapLibre GL JS 6.13.0 with named ESM imports and Vite's
+bundled worker URL. Run them through Vite, not by opening the HTML as `file://`.
+
 ## Installation
 
 ```bash
@@ -18,6 +21,7 @@ npm install maplibre-gl-layer-control maplibre-gl
 | [full-demo](./full-demo) | Comprehensive demo with multiple layer types |
 | [dynamic-layers](./dynamic-layers) | Auto-detect layers added before or after control |
 | [background-legend](./background-legend) | Control individual background layer visibility |
+| [pattern-fill](./pattern-fill) | Single-file raster and SDF pattern-preview demo with a tint button |
 | [react](./react) | React integration example |
 
 ## Quick Start with npm
@@ -36,10 +40,13 @@ npm run dev
 See [basic/](./basic) for a simple example.
 
 ```javascript
-import maplibregl from 'maplibre-gl';
+import * as maplibregl from 'maplibre-gl';
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { LayerControl } from 'maplibre-gl-layer-control';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import 'maplibre-gl-layer-control/style.css';
+
+maplibregl.setWorkerUrl(workerUrl);
 
 const map = new maplibregl.Map({
   container: 'map',
@@ -73,10 +80,14 @@ See [react/](./react) for React component usage.
 
 ```tsx
 import { useEffect, useRef, useState } from 'react';
-import maplibregl, { Map as MapLibreMap } from 'maplibre-gl';
+import * as maplibregl from 'maplibre-gl';
+import type { Map as MapLibreMap } from 'maplibre-gl';
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { LayerControlReact } from 'maplibre-gl-layer-control/react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import 'maplibre-gl-layer-control/style.css';
+
+maplibregl.setWorkerUrl(workerUrl);
 
 export default function App() {
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -127,5 +138,6 @@ npm run dev
 
 # Then open http://localhost:5173/examples/basic/
 # or http://localhost:5173/examples/full-demo/
+# or http://localhost:5173/examples/pattern-fill/
 # or http://localhost:5173/examples/react/
 ```

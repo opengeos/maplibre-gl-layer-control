@@ -12,9 +12,9 @@ A comprehensive layer control for MapLibre GL with advanced styling capabilities
 
 - ✅ **Auto-detection** - Automatically detects layer properties (opacity, visibility) and generates friendly names
 - ✅ **Layer visibility toggle** - Checkbox control for each layer
-- ✅ **Layer opacity control** - Smooth opacity slider with type-aware property mapping
+- ✅ **Layer opacity control** - Smooth opacity slider with type-aware property mapping; **double-click the slider to type an exact percentage (0-100%)**
 - ✅ **Layer symbols** - Visual type indicators (colored shapes) next to layer names, auto-detected from layer paint properties
-- ✅ **Resizable panel** - Adjustable panel width (240-420px) with keyboard support
+- ✅ **Resizable panel** - **Drag either edge of the panel to resize it**; double-click an edge to reset to the default width. The panel also grows to fill the available height so long layer lists only scroll once they exceed the map.
 - ✅ **Advanced style editor** - Per-layer-type styling controls:
   - **Fill layers**: color, opacity, outline-color
   - **Line layers**: color, width, opacity, blur
@@ -24,10 +24,31 @@ A comprehensive layer control for MapLibre GL with advanced styling capabilities
 - ✅ **Dynamic layer detection** - Automatically detect and manage new layers
 - ✅ **Background layer grouping** - Control all basemap layers as one group
 - ✅ **Background layer legend** - Gear icon to toggle individual background layer visibility
+- ✅ **Saved configurations** - Save the current basemap element visibility as a named preset and re-apply it with one click; presets persist across sessions and projects via `localStorage`
 - ✅ **Accessibility** - Full ARIA support and keyboard navigation
 - ✅ **TypeScript** - Full type safety and IntelliSense support
 - ✅ **React integration** - Optional React components and hooks
 - ✅ **Custom layer adapters** - Integrate non-MapLibre layers (deck.gl, Zarr, etc.)
+- ✅ **Layer groups** - Nest an adapter's layers in collapsible, nestable folders with their own visibility checkbox and opacity slider
+
+### Pattern-fill previews
+
+Fill-layer symbols and background-legend symbols display `fill-pattern` images
+from the map's sprite or `map.addImage()`. Regular images retain their colours
+and transparency. Images registered with `{ sdf: true }` are decoded from their
+alpha distance field and tinted with the preview's `fill-color` (black when
+unspecified), rather than shown as raw distance-field pixels.
+
+The preview respects image `pixelRatio` and scales large tiles down to keep the
+repeating motif visible. Paint changes and newly loaded images refresh existing
+symbols. `map.updateImage()` changes appear on the next map `idle` event; call
+`map.triggerRepaint()` if no render is pending. Missing images retain the solid
+fill preview until the image becomes available.
+
+For expressions, the preview uses the first available literal image output;
+it does not evaluate feature-dependent image names. MapLibre GL JS 6.13 supports
+SDF fill colourization on the map as well; older renderers may show raw SDF pixels
+even when the control displays a tinted preview.
 
 ## Installation
 
@@ -35,14 +56,22 @@ A comprehensive layer control for MapLibre GL with advanced styling capabilities
 npm install maplibre-gl-layer-control
 ```
 
+The development setup and examples use MapLibre GL JS 6.13.0. Version 6 uses
+named ESM exports. Vite apps must configure the worker with `?worker&url`, as
+shown below; direct CDN module imports auto-detect it. See the
+[v5-to-v6 migration guide](https://maplibre.org/maplibre-gl-js/docs/guides/v5-to-v6-migration-guide/).
+
 ## Quick Start
 
 ### Vanilla JavaScript
 
 ```typescript
-import maplibregl from 'maplibre-gl';
+import * as maplibregl from 'maplibre-gl';
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { LayerControl } from 'maplibre-gl-layer-control';
 import 'maplibre-gl-layer-control/style.css';
+
+maplibregl.setWorkerUrl(workerUrl);
 
 const map = new maplibregl.Map({
   container: 'map',
@@ -72,7 +101,7 @@ map.on('load', () => {
     layers: ['my-layer'], // LayerControl auto-detects opacity, visibility, and generates friendly names
     panelWidth: 340,
     panelMinWidth: 240,
-    panelMaxWidth: 450
+    panelMaxWidth: 960
   });
 
   // Option 2: Auto-detect with basemapStyleUrl (recommended for reliable basemap detection)
@@ -92,7 +121,7 @@ map.on('load', () => {
   //   collapsed: false,
   //   panelWidth: 340,
   //   panelMinWidth: 240,
-  //   panelMaxWidth: 450
+  //   panelMaxWidth: 960
   // });
 
   // Option 4: Manually specify layer states (for full control over names)
@@ -115,10 +144,14 @@ map.on('load', () => {
 
 ```typescript
 import { useState, useEffect } from 'react';
-import maplibregl, { Map as MapLibreMap } from 'maplibre-gl';
+import * as maplibregl from 'maplibre-gl';
+import type { Map as MapLibreMap } from 'maplibre-gl';
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { LayerControlReact } from 'maplibre-gl-layer-control/react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import 'maplibre-gl-layer-control/style.css';
+
+maplibregl.setWorkerUrl(workerUrl);
 
 function MapComponent() {
   const [map, setMap] = useState<MapLibreMap | null>(null);
@@ -166,8 +199,8 @@ function MapComponent() {
 | `layerStates` | `Record<string, LayerState>` | `undefined` | Manual layer state configuration |
 | `panelWidth` | `number` | `320` | Initial panel width in pixels |
 | `panelMinWidth` | `number` | `240` | Minimum panel width |
-| `panelMaxWidth` | `number` | `420` | Maximum panel width |
-| `panelMaxHeight` | `number` | `600` | Maximum panel height (scrollable when exceeded) |
+| `panelMaxWidth` | `number` | `960` | Maximum panel width |
+| `panelMaxHeight` | `number` | `undefined` | Maximum panel height in pixels. Omit to fill the available vertical space (scrollable only when the layer list is taller than the map) |
 | `showStyleEditor` | `boolean` | `true` | Show gear icon for style editor |
 | `showOpacitySlider` | `boolean` | `true` | Show opacity slider for layers |
 | `showLayerSymbol` | `boolean` | `true` | Show layer type symbols (colored icons) next to layer names |
@@ -175,6 +208,11 @@ function MapComponent() {
 | `excludeLayers` | `string[]` | `undefined` | Array of wildcard patterns to exclude layers by name (e.g., `['*-temp-*', 'debug-*']`) |
 | `customLayerAdapters` | `CustomLayerAdapter[]` | `undefined` | Adapters for non-MapLibre layers (deck.gl, Zarr, etc.) |
 | `basemapStyleUrl` | `string` | `undefined` | URL of basemap style JSON for reliable layer detection (see below) |
+| `enableBackgroundPresets` | `boolean` | `true` | Show the "Saved configurations" controls in the Background Layers panel |
+| `backgroundPresetStorageKey` | `string` | `'maplibre-layer-control:background-presets'` | `localStorage` key under which background visibility presets are stored |
+| `onBackgroundPresetsChange` | `(presets: BackgroundPresets) => void` | `undefined` | Called whenever the saved preset set changes (created or deleted); applying a preset does not change the set, so it does not fire |
+| `onBackgroundVisibilityChange` | `(visible: boolean) => void` | `undefined` | Called when the Background (basemap) group is toggled via the checkbox; mirror it into your own store to keep external basemap UI in sync |
+| `onBackgroundOpacityChange` | `(opacity: number) => void` | `undefined` | Called when the Background (basemap) group opacity slider changes; mirror it into your own store to keep external basemap UI in sync |
 
 ### LayerState
 
@@ -274,7 +312,9 @@ The layer control displays visual symbols (colored icons) next to each layer nam
 | `background` | Rectangle with inner border |
 | Background group | Stacked layers icon |
 
-The symbol color is automatically extracted from the layer's paint properties (e.g., `fill-color`, `line-color`, `circle-color`). If a color cannot be determined, a neutral gray is used.
+The symbol color is automatically extracted from the layer's paint properties (e.g., `fill-color`, `line-color`, `circle-color`). Standard CSS color strings are supported, including names, hex, RGB(A), and HSL(A); previews use six-digit RGB and ignore alpha. For `case`, `match`, and `interpolate` expressions, only result/output literals are inspected. The public `normalizeColor()` utility returns `null` for invalid values; invalid candidates are skipped, and a neutral gray is used when no color can be determined.
+
+Line previews reflect `line-dasharray`, scaled to fit the swatch. Circle previews use `circle-stroke-color` for the border; setting `circle-stroke-width` to `0` removes the border.
 
 To disable layer symbols:
 
@@ -293,8 +333,30 @@ When using the `layers` option to specify specific layers, all other layers are 
 - Quick "Show All" / "Hide All" buttons
 - **"Only rendered" filter** - Shows only layers that are currently rendered in the map viewport
 - Indeterminate checkbox state when some layers are hidden
+- **Saved configurations** - Save the current set of visibility toggles as a named preset and re-apply it later with one click
 
 This allows fine-grained control over which basemap layers are visible while maintaining a simplified layer control interface.
+
+#### Saved configurations (presets)
+
+The Background Layers panel includes a **Saved configurations** section that lets users save the current basemap element visibility as a named preset and re-apply it with a single click. Presets are stored in `localStorage`, so they persist across page reloads and apply to any project that uses the same basemap layers. Toggle the UI off with `enableBackgroundPresets: false`, or change the storage location with `backgroundPresetStorageKey`.
+
+The same functionality is available programmatically:
+
+```javascript
+// Capture the current basemap element visibility
+const visibility = layerControl.getBackgroundLayerVisibility();
+// → { 'water': true, 'road-primary': false, ... }
+
+// Apply a configuration (only layers present in the style are affected)
+layerControl.applyBackgroundLayerVisibility(visibility);
+
+// Named presets (persisted to localStorage)
+layerControl.saveBackgroundPreset('Minimal');   // save current visibility
+layerControl.getBackgroundPresets();            // → { Minimal: { ... } }
+layerControl.applyBackgroundPreset('Minimal');  // → true if it existed
+layerControl.deleteBackgroundPreset('Minimal');
+```
 
 ### Custom Layer Adapters
 
@@ -440,6 +502,36 @@ map.addControl(layerControl, 'top-right');
 deckLayers.set('my-deck-layer', myDeckLayer);
 deckAdapter.notifyLayerAdded('my-deck-layer');
 ```
+
+#### Layer Groups
+
+An adapter can organize its layers into collapsible folders by implementing the optional group methods. The panel then nests each layer under its group, nested groups included, and gives every group a collapse toggle, a visibility checkbox, and an opacity slider.
+
+```typescript
+interface LayerGroupState {
+  id: string;
+  name: string;
+  parentId?: string; // enclosing group; omit for a top-level group
+  visible: boolean;
+  opacity: number; // 0-1
+  collapsed: boolean;
+}
+
+interface CustomLayerAdapter {
+  // ...the methods above, plus:
+  getGroups?(): LayerGroupState[];
+  getLayerGroupId?(layerId: string): string | undefined;
+  setGroupVisibility?(groupId: string, visible: boolean): void;
+  setGroupOpacity?(groupId: string, opacity: number): void;
+  setGroupCollapsed?(groupId: string, collapsed: boolean): void;
+}
+```
+
+- A group's `visible` and `opacity` are its own settings. The control shows and edits them, but it never folds them into the layer rows or applies them to the map: hiding or fading a group's layers is the adapter's job (for example, by ANDing the group's visibility into each child's).
+- A group renders at the position of its top-most layer. Groups with no layers, directly or through a nested group, are not shown.
+- Drag-and-drop and the context-menu moves keep a layer inside its own group, where a nested group counts as one block (a layer moves past it whole). Groups themselves cannot be dragged.
+- **Show All** / **Hide All** also show or hide every group.
+- When groups change outside the control, call `layerControl.refreshGroups()`. It rebuilds the panel when a group was added, removed, or re-parented, or a layer changed group, and otherwise updates the group rows in place.
 
 #### Limitations
 

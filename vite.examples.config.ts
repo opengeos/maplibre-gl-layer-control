@@ -17,6 +17,7 @@ export default defineConfig({
         'full-demo': resolve(__dirname, 'examples/full-demo/index.html'),
         'dynamic-layers': resolve(__dirname, 'examples/dynamic-layers/index.html'),
         'background-legend': resolve(__dirname, 'examples/background-legend/index.html'),
+        'pattern-fill': resolve(__dirname, 'examples/pattern-fill/index.html'),
         react: resolve(__dirname, 'examples/react/index.html'),
         cdn: resolve(__dirname, 'examples/cdn/index.html'),
       },
