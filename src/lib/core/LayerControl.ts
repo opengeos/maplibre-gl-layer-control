@@ -1,6 +1,7 @@
 import type {
   IControl,
   Map as MapLibreMap,
+  MapEventType,
   LayerSpecification,
   AllPaintProperties,
 } from "maplibre-gl";
@@ -61,6 +62,10 @@ export class LayerControl implements IControl {
   // Panel positioning
   private resizeHandler: (() => void) | null = null;
   private mapResizeHandler: (() => void) | null = null;
+  // Map listeners added by setupLayerChangeListeners, kept so onRemove can take them off again.
+  private mapLayerListeners: Array<
+    [keyof MapEventType, (e: MapEventType[keyof MapEventType]) => void]
+  > = [];
 
   // State management
   private state: InternalControlState;
@@ -350,6 +355,13 @@ export class LayerControl implements IControl {
       this.map.off("resize", this.mapResizeHandler);
       this.mapResizeHandler = null;
     }
+
+    // Remove map layer-change listeners. Left behind, they kept syncing a removed control on
+    // every map event, and a host that rebuilds the control piled up one more set each time.
+    for (const [type, fn] of this.mapLayerListeners) {
+      this.map.off(type, fn);
+    }
+    this.mapLayerListeners = [];
 
     // Clean up context menu
     if (this.contextMenuEl) {
@@ -1200,7 +1212,18 @@ export class LayerControl implements IControl {
    * Setup listeners for map layer changes
    */
   private setupLayerChangeListeners(): void {
-    this.map.on("styledata", () => {
+    const listen = <T extends keyof MapEventType>(
+      type: T,
+      fn: (e: MapEventType[T]) => void,
+    ): void => {
+      this.map.on(type, fn);
+      this.mapLayerListeners.push([
+        type,
+        fn as (e: MapEventType[keyof MapEventType]) => void,
+      ]);
+    };
+
+    listen("styledata", () => {
       setTimeout(() => {
         this.updateLayerStatesFromMap();
         this.checkForNewLayers();
@@ -1210,9 +1233,9 @@ export class LayerControl implements IControl {
     });
 
     // Observe updated image pixels after the next completed map render.
-    this.map.on("idle", () => this.updateFillSymbols());
+    listen("idle", () => this.updateFillSymbols());
 
-    this.map.on("data", (e) => {
+    listen("data", (e) => {
       if ("sourceDataType" in e && e.sourceDataType === "content") {
         setTimeout(() => {
           this.updateLayerStatesFromMap();
@@ -1221,7 +1244,7 @@ export class LayerControl implements IControl {
       }
     });
 
-    this.map.on("sourcedata", (e) => {
+    listen("sourcedata", (e) => {
       if (e.sourceDataType === "metadata") {
         setTimeout(() => {
           this.checkForNewLayers();
@@ -4754,6 +4777,11 @@ export class LayerControl implements IControl {
       return; // Don't update while user is dragging
     }
 
+    // Find the rows once. Looking each layer's row up by scanning every row made a sync cost
+    // layers x rows, and a sync runs on every styledata and data event: with a few hundred
+    // layers that froze the page.
+    const rows = this.rowsByLayerId();
+
     Object.keys(this.state.layerStates).forEach((layerId) => {
       try {
         // Skip custom layers - they manage their own state via adapters
@@ -4781,7 +4809,7 @@ export class LayerControl implements IControl {
         }
 
         // Update UI
-        this.updateUIForLayer(layerId, isVisible, opacity);
+        this.updateUIForLayer(layerId, isVisible, opacity, rows);
       } catch (error) {
         console.warn(`Failed to update state for layer ${layerId}:`, error);
       }
@@ -4795,28 +4823,42 @@ export class LayerControl implements IControl {
     layerId: string,
     visible: boolean,
     opacity: number,
+    rows: Map<string, HTMLElement[]> = this.rowsByLayerId(),
   ): void {
-    const layerItems = this.panel.querySelectorAll(".layer-control-item");
+    for (const item of rows.get(layerId) ?? []) {
+      const checkbox = item.querySelector(
+        ".layer-control-checkbox",
+      ) as HTMLInputElement;
+      const opacitySlider = item.querySelector(
+        ".layer-control-opacity",
+      ) as HTMLInputElement;
 
-    layerItems.forEach((item) => {
-      if ((item as HTMLElement).dataset.layerId === layerId) {
-        const checkbox = item.querySelector(
-          ".layer-control-checkbox",
-        ) as HTMLInputElement;
-        const opacitySlider = item.querySelector(
-          ".layer-control-opacity",
-        ) as HTMLInputElement;
-
-        if (checkbox) {
-          checkbox.checked = visible;
-        }
-
-        if (opacitySlider) {
-          opacitySlider.value = String(opacity);
-          opacitySlider.title = `Opacity: ${Math.round(opacity * 100)}%`;
-        }
+      if (checkbox) {
+        checkbox.checked = visible;
       }
-    });
+
+      if (opacitySlider) {
+        opacitySlider.value = String(opacity);
+        opacitySlider.title = `Opacity: ${Math.round(opacity * 100)}%`;
+      }
+    }
+  }
+
+  /**
+   * The panel's layer rows, by layer ID
+   */
+  private rowsByLayerId(): Map<string, HTMLElement[]> {
+    const rows = new Map<string, HTMLElement[]>();
+    this.panel
+      .querySelectorAll<HTMLElement>(".layer-control-item")
+      .forEach((item) => {
+        const id = item.dataset.layerId;
+        if (id === undefined) return;
+        const list = rows.get(id);
+        if (list) list.push(item);
+        else rows.set(id, [item]);
+      });
+    return rows;
   }
 
   /**
