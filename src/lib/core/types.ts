@@ -216,6 +216,15 @@ export interface LayerControlOptions {
    * and user-added layers.
    */
   basemapStyleUrl?: string;
+  /**
+   * IDs of the layers that make up the basemap, for applications that already
+   * know them (or have no fetchable style URL, such as a style built in code).
+   * Those layers are grouped under "Background" and every other layer is
+   * treated as user-added. Takes precedence over `basemapStyleUrl` (nothing is
+   * fetched), and an empty array is honoured as "no basemap layers" rather than
+   * falling back to heuristic detection.
+   */
+  basemapLayerIds?: string[];
   /** Whether to enable context menu (right-click) on layers (default: true) */
   enableContextMenu?: boolean;
   /** Whether to enable drag-and-drop reordering of layers (default: true) */
