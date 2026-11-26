@@ -100,6 +100,10 @@ export class LayerControl implements IControl {
   private basemapLayerIds: Set<string> | null = null;
   /** True when `basemapLayerIds` came from the option, which is authoritative even when empty. */
   private basemapLayerIdsProvided = false;
+  /** Set once onAdd has listed the map's layers (after any basemapStyleUrl fetch). */
+  private layersListed = false;
+  /** Panel order set through setLayerOrder, used to order layers with nothing on the map. */
+  private layerOrderHint: string[] | null = null;
   private widthFrame: number | null = null;
 
   // Exact-opacity input popup
@@ -244,6 +248,7 @@ export class LayerControl implements IControl {
   onAdd(map: MapLibreMap): HTMLElement {
     this.map = map;
     this.mapContainer = map.getContainer();
+    this.layersListed = false;
 
     // Capture initial source IDs and layer IDs (basemap) before auto-detecting layers
     // Sources and layers added after this point are considered user-added
@@ -288,6 +293,7 @@ export class LayerControl implements IControl {
           }
           // Build layer items
           this.buildLayerItems();
+          this.layersListed = true;
         })
         .catch((error) => {
           console.warn(
@@ -299,6 +305,7 @@ export class LayerControl implements IControl {
             this.autoDetectLayers();
           }
           this.buildLayerItems();
+          this.layersListed = true;
         });
     } else {
       // Auto-detect layers using source-based heuristics
@@ -307,6 +314,7 @@ export class LayerControl implements IControl {
       }
       // Build layer items
       this.buildLayerItems();
+      this.layersListed = true;
     }
 
     // If panel starts expanded, update position after control is added to DOM
@@ -1334,16 +1342,17 @@ export class LayerControl implements IControl {
    * Only layers the control already lists are updated, with one exception:
    * `"Background"` adds the Background row when the control has none (a style
    * whose basemap lives in style imports has no root basemap layers to detect,
-   * so the control would otherwise show no Background row). Call it after the
-   * control is added to the map; seeding state earlier would stop the control
-   * from detecting layers on its own.
+   * so the control would otherwise show no Background row). It returns false
+   * until the control has listed the map's layers (after `onAdd`, and after a
+   * `basemapStyleUrl` fetch), since seeding state earlier would stop the
+   * control from detecting layers on its own.
    *
    * @param layerId The layer ID, or `"Background"` for the basemap row
    * @param state The fields to change; omitted fields keep their value
    * @returns True if a layer state was updated or created
    */
   setLayerState(layerId: string, state: Partial<Pick<LayerState, "visible" | "opacity" | "name">>): boolean {
-    if (!this.panel) return false;
+    if (!this.panel || !this.layersListed) return false;
     let current = this.state.layerStates[layerId];
     if (!current) {
       if (layerId !== "Background") return false;
@@ -1356,7 +1365,13 @@ export class LayerControl implements IControl {
     }
     if (state.visible !== undefined) current.visible = state.visible;
     if (state.opacity !== undefined) current.opacity = state.opacity;
-    if (state.name !== undefined) current.name = state.name;
+    if (state.name !== undefined) {
+      current.name = state.name;
+      // A context-menu rename is cached and wins on the next rebuild.
+      if (this.state.customLayerNames.has(layerId)) {
+        this.state.customLayerNames.set(layerId, state.name);
+      }
+    }
 
     for (const item of this.rowsByLayerId().get(layerId) ?? []) {
       const checkbox = item.querySelector<HTMLInputElement>(
@@ -1390,19 +1405,27 @@ export class LayerControl implements IControl {
    * back after an application refused a drag or context-menu move, since the
    * control has already moved the row by then. Layers not listed keep their
    * relative order after the listed ones, and Background stays at the bottom.
+   * A hidden custom layer whose adapter has other layers on the map keeps its
+   * slot beside them in that adapter's list, since the adapter is the source of
+   * truth for where it sits; this order breaks the remaining ties.
    *
    * @param layerIds Layer IDs, top of the panel first
    */
   setLayerOrder(layerIds: readonly string[]): void {
     const states = this.state.layerStates;
+    const order: string[] = [];
+    const seen = new Set<string>(["Background"]);
+    for (const id of [...layerIds, ...Object.keys(states)]) {
+      if (id in states && !seen.has(id)) {
+        seen.add(id);
+        order.push(id);
+      }
+    }
+    // Kept as a list: object key order cannot hold integer-like IDs in order.
+    this.layerOrderHint = order;
     const ordered: LayerStates = {};
     if ("Background" in states) ordered.Background = states.Background;
-    for (const id of layerIds) {
-      if (id in states && !(id in ordered)) ordered[id] = states[id];
-    }
-    for (const [id, layerState] of Object.entries(states)) {
-      if (!(id in ordered)) ordered[id] = layerState;
-    }
+    for (const id of order) ordered[id] = states[id];
     this.state.layerStates = ordered;
     if (this.panel) this.buildLayerItems();
   }
@@ -5605,6 +5628,16 @@ export class LayerControl implements IControl {
     const userLayerIds = Object.keys(this.state.layerStates).filter(
       (id) => id !== "Background",
     );
+    const hint = this.layerOrderHint;
+    if (hint) {
+      const rank = new Map(hint.map((id, index) => [id, index]));
+      const keyIndex = new Map(userLayerIds.map((id, index) => [id, index]));
+      userLayerIds.sort(
+        (a, b) =>
+          (rank.get(a) ?? hint.length + keyIndex.get(a)!) -
+          (rank.get(b) ?? hint.length + keyIndex.get(b)!),
+      );
+    }
 
     // Compute a representative z-position (map index) for every user layer so
     // that MapLibre layers and custom layers can be ordered together by their

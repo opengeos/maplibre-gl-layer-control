@@ -159,6 +159,48 @@ describe("setLayerState", () => {
   });
 });
 
+describe("setLayerState timing and names", () => {
+  it("waits for basemapStyleUrl detection before seeding Background", async () => {
+    let resolveFetch!: (value: unknown) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise((resolve) => (resolveFetch = resolve))),
+    );
+    try {
+      const { control, container } = mount(["base", "user-a"], {
+        basemapStyleUrl: "https://example.com/style.json",
+      });
+      expect(control.setLayerState("Background", { visible: false })).toBe(
+        false,
+      );
+
+      resolveFetch({
+        ok: true,
+        json: async () => ({ layers: [{ id: "base" }] }),
+      });
+      await vi.waitFor(() =>
+        expect(rows(container)).toEqual(["user-a", "Background"]),
+      );
+      expect(control.setLayerState("Background", { visible: false })).toBe(
+        true,
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("replaces a cached context-menu rename", () => {
+    const { control, container } = mount(["base", "user-a"], {
+      basemapLayerIds: ["base"],
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (control as any).state.customLayerNames.set("user-a", "Old");
+    control.setLayerState("user-a", { name: "New" });
+    control.setLayerOrder([]);
+    expect(row(container, "user-a").name).toBe("New");
+  });
+});
+
 describe("setLayerOrder", () => {
   it("orders layers with nothing on the map and keeps Background last", () => {
     const ids = ["a", "b", "c"];
@@ -184,6 +226,29 @@ describe("setLayerOrder", () => {
     control.setLayerOrder(["c", "a"]);
 
     expect(rows(container)).toEqual(["c", "a", "b", "Background"]);
+  });
+
+  it("keeps the order of integer-like IDs", () => {
+    const ids = ["1", "2"];
+    const { control, container } = mount(["base"], {
+      basemapLayerIds: ["base"],
+      customLayerAdapters: [
+        {
+          type: "app",
+          getLayerIds: () => ids,
+          getLayerState: (id: string) => ({
+            visible: false,
+            opacity: 1,
+            name: id,
+          }),
+          setVisibility: () => {},
+          setOpacity: () => {},
+          getName: (id: string) => id,
+        },
+      ],
+    });
+    control.setLayerOrder(["2", "1"]);
+    expect(rows(container)).toEqual(["2", "1", "Background"]);
   });
 });
 
