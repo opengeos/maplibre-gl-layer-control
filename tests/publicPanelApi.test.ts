@@ -173,7 +173,12 @@ describe("setLayerState timing and names", () => {
       expect(control.setLayerState("Background", { visible: false })).toBe(
         true,
       );
-      expect(control.setLayerState("Background", { opacity: 0.3 })).toBe(true);
+      expect(
+        control.setLayerState("Background", {
+          visible: undefined,
+          opacity: 0.3,
+        }),
+      ).toBe(true);
       expect(rows(container)).toEqual([]);
 
       // The queued update applies once the fetch completes.

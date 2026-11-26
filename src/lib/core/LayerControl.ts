@@ -1363,10 +1363,12 @@ export class LayerControl implements IControl {
   setLayerState(layerId: string, state: Partial<Pick<LayerState, "visible" | "opacity" | "name">>): boolean {
     if (!this.panel) return false;
     if (!this.layersListed) {
-      this.pendingLayerStates.set(layerId, {
-        ...this.pendingLayerStates.get(layerId),
-        ...state,
-      });
+      const queued = { ...this.pendingLayerStates.get(layerId) };
+      // Merge only defined fields, matching how an applied update treats them.
+      if (state.visible !== undefined) queued.visible = state.visible;
+      if (state.opacity !== undefined) queued.opacity = state.opacity;
+      if (state.name !== undefined) queued.name = state.name;
+      this.pendingLayerStates.set(layerId, queued);
       return true;
     }
     let current = this.state.layerStates[layerId];
