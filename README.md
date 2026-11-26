@@ -241,6 +241,7 @@ function MapComponent() {
 | `excludeLayers` | `string[]` | `undefined` | Array of wildcard patterns to exclude layers by name (e.g., `['*-temp-*', 'debug-*']`) |
 | `customLayerAdapters` | `CustomLayerAdapter[]` | `undefined` | Adapters for non-MapLibre layers (deck.gl, Zarr, etc.) |
 | `basemapStyleUrl` | `string` | `undefined` | URL of basemap style JSON for reliable layer detection (see below) |
+| `basemapLayerIds` | `string[]` | `undefined` | Basemap layer IDs, when you already know them; takes precedence over `basemapStyleUrl`, and an empty array means "no basemap layers" (see below) |
 | `enableContextMenu` | `boolean` | `true` | Enable the right-click context menu on layers (Rename, Zoom to Layer, Move Up/Down/to Top/to Bottom, Remove Layer) |
 | `enableDragAndDrop` | `boolean` | `true` | Enable drag-and-drop reordering of layers in the panel |
 | `onLayerRename` | `(layerId: string, oldName: string, newName: string) => void` | `undefined` | Called when a layer is renamed through the context menu |
@@ -302,6 +303,16 @@ When `basemapStyleUrl` is provided:
 - Layers that exist in the basemap style are grouped under "Background"
 - All other layers (user-added) are shown individually in the control
 - New layers added later are automatically detected as user layers
+
+### Explicit basemap layer IDs
+
+When the application already knows which layers are the basemap (for example, a style built in code with no URL to fetch), pass them directly. Nothing is fetched, and an empty array is honoured as "no basemap layers" instead of falling back to the heuristics below:
+
+```javascript
+const layerControl = new LayerControl({
+  basemapLayerIds: map.getStyle().layers.map((layer) => layer.id),
+});
+```
 
 ### Automatic Detection Without basemapStyleUrl
 
@@ -581,6 +592,16 @@ interface CustomLayerAdapter {
 - Drag-and-drop and the context-menu moves keep a layer inside its own group, where a nested group counts as one block (a layer moves past it whole). Groups themselves cannot be dragged.
 - **Show All** / **Hide All** also show or hide every group.
 - When groups change outside the control, call `layerControl.refreshGroups()`. It rebuilds the panel when a group was added, removed, or re-parented, or a layer changed group, and otherwise updates the group rows in place.
+
+### Driving the panel from outside
+
+Applications that keep layer state in their own store (and drive the map from it) can mirror that state into the panel without rebuilding it:
+
+| Method | Description |
+|--------|-------------|
+| `setLayerState(layerId, { visible?, opacity?, name? })` | Update a row's checkbox, opacity slider and name in place, without touching the map or firing callbacks. Only listed layers are updated, except that `"Background"` adds the Background row when there is none (a style whose basemap lives in style imports). Returns `false` (and does nothing) until the control has listed the map's layers, which is after `onAdd` and after any `basemapStyleUrl` fetch; otherwise `true` when a state was updated or created. |
+| `setLayerOrder(layerIds)` | Set the panel order (top first) for layers with nothing on the map to sort them by, then redraw the rows. Use it to put the panel back after refusing a drag or context-menu move reported through `onLayerReorder`. A hidden custom layer whose adapter has other layers on the map keeps its slot beside them in the adapter's list. |
+| `isCollapsed()` / `expand()` / `collapse()` | Read or change whether the panel is open, for example to remount a control in the state the user left it. |
 
 #### Limitations
 
