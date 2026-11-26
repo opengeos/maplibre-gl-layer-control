@@ -160,30 +160,34 @@ describe("setLayerState", () => {
 });
 
 describe("setLayerState timing and names", () => {
-  it("waits for basemapStyleUrl detection before seeding Background", async () => {
+  it("queues a Background update until basemapStyleUrl detection finishes", async () => {
     let resolveFetch!: (value: unknown) => void;
     vi.stubGlobal(
       "fetch",
       vi.fn(() => new Promise((resolve) => (resolveFetch = resolve))),
     );
     try {
-      const { control, container } = mount(["base", "user-a"], {
+      const { control, container } = mount(["user-a"], {
         basemapStyleUrl: "https://example.com/style.json",
       });
       expect(control.setLayerState("Background", { visible: false })).toBe(
-        false,
-      );
-
-      resolveFetch({
-        ok: true,
-        json: async () => ({ layers: [{ id: "base" }] }),
-      });
-      await vi.waitFor(() =>
-        expect(rows(container)).toEqual(["user-a", "Background"]),
-      );
-      expect(control.setLayerState("Background", { visible: false })).toBe(
         true,
       );
+      expect(
+        control.setLayerState("Background", {
+          visible: undefined,
+          opacity: 0.3,
+        }),
+      ).toBe(true);
+      expect(rows(container)).toEqual([]);
+
+      // The queued update applies once the fetch completes.
+      resolveFetch({ ok: true, json: async () => ({ layers: [] }) });
+      await vi.waitFor(() => expect(rows(container)).toContain("Background"));
+      expect(row(container, "Background")).toMatchObject({
+        checked: false,
+        opacity: "0.3",
+      });
     } finally {
       vi.unstubAllGlobals();
     }
