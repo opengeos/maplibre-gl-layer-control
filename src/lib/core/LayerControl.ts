@@ -102,6 +102,11 @@ export class LayerControl implements IControl {
   private basemapLayerIdsProvided = false;
   /** Set once onAdd has listed the map's layers (after any basemapStyleUrl fetch). */
   private layersListed = false;
+  /** setLayerState calls made before the layers were listed, applied once they are. */
+  private pendingLayerStates = new Map<
+    string,
+    Partial<Pick<LayerState, "visible" | "opacity" | "name">>
+  >();
   /** Panel order set through setLayerOrder, used to order layers with nothing on the map. */
   private layerOrderHint: string[] | null = null;
   private widthFrame: number | null = null;
@@ -249,6 +254,7 @@ export class LayerControl implements IControl {
     this.map = map;
     this.mapContainer = map.getContainer();
     this.layersListed = false;
+    this.pendingLayerStates.clear();
 
     // Capture initial source IDs and layer IDs (basemap) before auto-detecting layers
     // Sources and layers added after this point are considered user-added
@@ -293,7 +299,7 @@ export class LayerControl implements IControl {
           }
           // Build layer items
           this.buildLayerItems();
-          this.layersListed = true;
+          this.finishListing();
         })
         .catch((error) => {
           console.warn(
@@ -305,7 +311,7 @@ export class LayerControl implements IControl {
             this.autoDetectLayers();
           }
           this.buildLayerItems();
-          this.layersListed = true;
+          this.finishListing();
         });
     } else {
       // Auto-detect layers using source-based heuristics
@@ -314,7 +320,7 @@ export class LayerControl implements IControl {
       }
       // Build layer items
       this.buildLayerItems();
-      this.layersListed = true;
+      this.finishListing();
     }
 
     // If panel starts expanded, update position after control is added to DOM
@@ -1342,17 +1348,27 @@ export class LayerControl implements IControl {
    * Only layers the control already lists are updated, with one exception:
    * `"Background"` adds the Background row when the control has none (a style
    * whose basemap lives in style imports has no root basemap layers to detect,
-   * so the control would otherwise show no Background row). It returns false
-   * until the control has listed the map's layers (after `onAdd`, and after a
-   * `basemapStyleUrl` fetch), since seeding state earlier would stop the
-   * control from detecting layers on its own.
+   * so the control would otherwise show no Background row).
+   *
+   * Until the control has listed the map's layers (during `onAdd`, and while a
+   * `basemapStyleUrl` fetch is in flight) the update is queued and applied
+   * once they are listed, since seeding state earlier would stop the control
+   * from detecting layers on its own.
    *
    * @param layerId The layer ID, or `"Background"` for the basemap row
    * @param state The fields to change; omitted fields keep their value
-   * @returns True if a layer state was updated or created
+   * @returns True if a layer state was updated, created or queued; false
+   *   before the control is added to a map or for a layer it does not list
    */
   setLayerState(layerId: string, state: Partial<Pick<LayerState, "visible" | "opacity" | "name">>): boolean {
-    if (!this.panel || !this.layersListed) return false;
+    if (!this.panel) return false;
+    if (!this.layersListed) {
+      this.pendingLayerStates.set(layerId, {
+        ...this.pendingLayerStates.get(layerId),
+        ...state,
+      });
+      return true;
+    }
     let current = this.state.layerStates[layerId];
     if (!current) {
       if (layerId !== "Background") return false;
@@ -1394,6 +1410,17 @@ export class LayerControl implements IControl {
       }
     }
     return true;
+  }
+
+  /**
+   * Mark the map's layers as listed and apply setLayerState calls queued
+   * before then.
+   */
+  private finishListing(): void {
+    this.layersListed = true;
+    const pending = [...this.pendingLayerStates];
+    this.pendingLayerStates.clear();
+    for (const [layerId, state] of pending) this.setLayerState(layerId, state);
   }
 
   /**
